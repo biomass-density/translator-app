@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function ParticipantsPanel({ participants, isOwner, currentUserId, onKick, onClose, t }) {
+export default function ParticipantsPanel({ participants, isOwner, currentUserId, onKick, onClose, t, darkMode }) {
   const [kickingId, setKickingId] = useState(null);
   const [error, setError] = useState('');
 
@@ -17,46 +17,59 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
     }
   };
 
+  const panelBg = darkMode ? 'bg-[#2C2C2E]' : 'bg-white';
+  const textPrimary = darkMode ? 'text-white' : 'text-[#1C1C1E]';
+  const textSecondary = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
+  const divider = darkMode ? 'divide-[#3A3A3C]' : 'divide-[#F2F2F0]';
+  const closeBtn = darkMode ? 'bg-[#3A3A3C] text-[#9B9B9B] hover:text-white' : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-40 p-4">
-      <div className="bg-gray-900 border border-white/20 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-white font-bold text-lg">
+    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-40 p-4">
+      <div className={`${panelBg} rounded-3xl w-full max-w-md shadow-xl overflow-hidden`}>
+        <div className="flex items-center justify-between px-6 py-4">
+          <h2 className={`font-bold text-base ${textPrimary}`}>
             {t.participants} ({participants.length})
           </h2>
-          <button onClick={onClose} className="text-white/60 hover:text-white text-2xl leading-none">
+          <button
+            onClick={onClose}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-lg leading-none transition-colors ${closeBtn}`}
+          >
             ×
           </button>
         </div>
 
         {error && (
-          <div className="mx-6 mt-3 bg-red-500/20 border border-red-500/40 rounded-xl px-4 py-2 text-red-200 text-sm">
+          <div className="mx-6 mb-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-2 text-red-600 text-sm">
             {error}
           </div>
         )}
 
-        <ul className="max-h-80 overflow-y-auto divide-y divide-white/10">
-          {participants.map((p) => (
-            <li key={p.id} className="flex items-center justify-between px-6 py-3">
-              <div>
-                <span className="text-white font-medium">{p.name}</span>
-                {p.id === currentUserId && (
-                  <span className="ml-2 text-xs text-indigo-300">(you)</span>
-                )}
-                <div className="text-white/50 text-xs">{p.language}</div>
+        <ul className={`max-h-72 overflow-y-auto divide-y ${divider} px-2 pb-4`}>
+          {participants.map(p => (
+            <li key={p.id} className="flex items-center justify-between px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-sm uppercase">
+                  {p.name.charAt(0)}
+                </div>
+                <div>
+                  <div className={`font-medium text-sm flex items-center gap-1.5 ${textPrimary}`}>
+                    {p.name}
+                    {p.id === currentUserId && (
+                      <span className={`text-[10px] font-normal ${textSecondary}`}>({t.you})</span>
+                    )}
+                  </div>
+                  <div className={`text-xs ${textSecondary}`}>{p.language}</div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${p.isOnline ? 'bg-green-400' : 'bg-gray-500'}`} />
-                {isOwner && p.id !== currentUserId && (
-                  <button
-                    onClick={() => handleKick(p.id, p.name)}
-                    disabled={kickingId === p.id}
-                    className="text-xs bg-red-600/80 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-2 py-1 rounded-lg transition-colors"
-                  >
-                    {kickingId === p.id ? t.kicking : t.kick}
-                  </button>
-                )}
-              </div>
+              {isOwner && p.id !== currentUserId && (
+                <button
+                  onClick={() => handleKick(p.id, p.name)}
+                  disabled={kickingId === p.id}
+                  className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50 transition-colors"
+                >
+                  {kickingId === p.id ? t.kicking : t.kick}
+                </button>
+              )}
             </li>
           ))}
         </ul>

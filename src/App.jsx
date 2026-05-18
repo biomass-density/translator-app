@@ -15,20 +15,29 @@ import {
 import { auth, db } from './firebase.js';
 import { hashPassword } from './crypto.js';
 import { getT } from './constants.js';
-
-const t = getT('English');
 import JoinRoom from './components/JoinRoom.jsx';
 import ChatRoom from './components/ChatRoom.jsx';
 
 const SESSION_KEY = 'babelchat_session';
+const THEME_KEY = 'babelchat_theme';
 
 export default function App() {
   const [userId, setUserId] = useState(null);
   const [authReady, setAuthReady] = useState(false);
-  const [session, setSession] = useState(null); // { roomId, userName, userLanguage, isOwner }
+  const [session, setSession] = useState(null);
   const [kicked, setKicked] = useState(false);
+  const [darkMode, setDarkMode] = useState(
+    () => localStorage.getItem(THEME_KEY) === 'dark'
+  );
 
-  // Sign in anonymously once, then attempt session restore
+  const toggleDarkMode = () => {
+    setDarkMode(prev => {
+      const next = !prev;
+      localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -38,7 +47,6 @@ export default function App() {
       } else {
         try {
           await signInAnonymously(auth);
-          // onAuthStateChanged will fire again with the new user
         } catch (err) {
           console.error('Anonymous sign-in failed:', err);
           setAuthReady(true);
@@ -57,7 +65,6 @@ export default function App() {
 
       const { roomId, userName, userLanguage } = saved;
 
-      // Check room exists
       const roomRef = doc(db, 'rooms', roomId);
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) {
@@ -65,7 +72,6 @@ export default function App() {
         return;
       }
 
-      // Kick-bypass check: if participant doc was deleted, treat as kicked
       const participantRef = doc(db, 'rooms', roomId, 'participants', uid);
       const participantSnap = await getDoc(participantRef);
       if (!participantSnap.exists()) {
@@ -83,35 +89,23 @@ export default function App() {
   }
 
   async function handleJoin({ roomId, name, password, language }) {
+    const t = getT(language);
     const hash = await hashPassword(password);
     const roomRef = doc(db, 'rooms', roomId);
     const roomSnap = await getDoc(roomRef);
 
-    if (!roomSnap.exists()) {
-      throw new Error(t.roomNotFound);
-    }
+    if (!roomSnap.exists()) throw new Error(t.roomNotFound);
 
     const roomData = roomSnap.data();
-    if (roomData.passwordHash !== hash) {
-      throw new Error(t.wrongPassword);
-    }
+    if (roomData.passwordHash !== hash) throw new Error(t.wrongPassword);
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
-    await setDoc(participantRef, {
-      name,
-      language,
-      joinedAt: Date.now(),
-      isOnline: true,
-    });
+    await setDoc(participantRef, { name, language, joinedAt: Date.now(), isOnline: true });
 
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     await setDoc(doc(msgsRef), {
-      isSystem: true,
-      action: 'join',
-      senderName: name,
-      senderId: userId,
-      timestamp: Date.now(),
-      translations: {},
+      isSystem: true, action: 'join', senderName: name,
+      senderId: userId, timestamp: Date.now(), translations: {},
     });
 
     const isOwner = roomData.createdBy === userId;
@@ -122,36 +116,22 @@ export default function App() {
   }
 
   async function handleCreateRoom({ roomId, name, password, language }) {
+    const t = getT(language);
     const hash = await hashPassword(password);
     const roomRef = doc(db, 'rooms', roomId);
     const existingSnap = await getDoc(roomRef);
 
-    if (existingSnap.exists()) {
-      throw new Error('A room with this ID already exists. Please choose a different ID.');
-    }
+    if (existingSnap.exists()) throw new Error(t.errorCreating);
 
-    await setDoc(roomRef, {
-      passwordHash: hash,
-      createdBy: userId,
-      createdAt: Date.now(),
-    });
+    await setDoc(roomRef, { passwordHash: hash, createdBy: userId, createdAt: Date.now() });
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
-    await setDoc(participantRef, {
-      name,
-      language,
-      joinedAt: Date.now(),
-      isOnline: true,
-    });
+    await setDoc(participantRef, { name, language, joinedAt: Date.now(), isOnline: true });
 
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     await setDoc(doc(msgsRef), {
-      isSystem: true,
-      action: 'join',
-      senderName: name,
-      senderId: userId,
-      timestamp: Date.now(),
-      translations: {},
+      isSystem: true, action: 'join', senderName: name,
+      senderId: userId, timestamp: Date.now(), translations: {},
     });
 
     const newSession = { roomId, userName: name, userLanguage: language, isOwner: true };
@@ -163,19 +143,12 @@ export default function App() {
   async function handleLeaveRoom() {
     if (!session || !userId) return;
     const { roomId, userName } = session;
-
     try {
-      const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
-      await deleteDoc(participantRef);
-
+      await deleteDoc(doc(db, 'rooms', roomId, 'participants', userId));
       const msgsRef = collection(db, 'rooms', roomId, 'messages');
       await setDoc(doc(msgsRef), {
-        isSystem: true,
-        action: 'leave',
-        senderName: userName,
-        senderId: userId,
-        timestamp: Date.now(),
-        translations: {},
+        isSystem: true, action: 'leave', senderName: userName,
+        senderId: userId, timestamp: Date.now(), translations: {},
       });
     } catch (err) {
       console.error('Error leaving room:', err);
@@ -188,19 +161,15 @@ export default function App() {
   async function handleDeleteRoom() {
     if (!session || !userId) return;
     const { roomId } = session;
-
-    const msgsRef = collection(db, 'rooms', roomId, 'messages');
-    const msgsSnap = await getDocs(msgsRef);
     const batch = writeBatch(db);
-    msgsSnap.forEach((d) => batch.delete(d.ref));
 
-    const participantsRef = collection(db, 'rooms', roomId, 'participants');
-    const participantsSnap = await getDocs(participantsRef);
-    participantsSnap.forEach((d) => batch.delete(d.ref));
+    const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
+    msgsSnap.forEach(d => batch.delete(d.ref));
 
-    const roomRef = doc(db, 'rooms', roomId);
-    batch.delete(roomRef);
+    const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
+    partsSnap.forEach(d => batch.delete(d.ref));
 
+    batch.delete(doc(db, 'rooms', roomId));
     await batch.commit();
 
     localStorage.removeItem(SESSION_KEY);
@@ -210,26 +179,21 @@ export default function App() {
   async function handleKickParticipant(kickedUserId, kickedUserName) {
     if (!session || !userId) return;
     const { roomId, userName: kickerName } = session;
-
-    const participantRef = doc(db, 'rooms', roomId, 'participants', kickedUserId);
-    await deleteDoc(participantRef);
-
+    await deleteDoc(doc(db, 'rooms', roomId, 'participants', kickedUserId));
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     await setDoc(doc(msgsRef), {
-      isSystem: true,
-      action: 'kick',
-      senderName: kickedUserName,
-      kickerName,
-      senderId: kickedUserId,
-      timestamp: Date.now(),
-      translations: {},
+      isSystem: true, action: 'kick', senderName: kickedUserName,
+      kickerName, senderId: kickedUserId, timestamp: Date.now(), translations: {},
     });
   }
 
+  const bg = darkMode ? 'bg-[#1C1C1E]' : 'bg-[#FAFAF7]';
+  const text = darkMode ? 'text-white' : 'text-[#1C1C1E]';
+
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center">
-        <div className="text-white text-xl">{t.loading}</div>
+      <div className={`min-h-screen ${bg} ${text} flex items-center justify-center`}>
+        <span className="text-lg font-medium opacity-60">{getT('English').loading}</span>
       </div>
     );
   }
@@ -242,6 +206,7 @@ export default function App() {
         userName={session.userName}
         userLanguage={session.userLanguage}
         isOwner={session.isOwner}
+        darkMode={darkMode}
         onLeave={handleLeaveRoom}
         onDelete={handleDeleteRoom}
         onKick={handleKickParticipant}
@@ -252,11 +217,16 @@ export default function App() {
   return (
     <>
       {kicked && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium">
-          {t.youWereKicked}
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-500 text-white px-6 py-3 rounded-2xl shadow-lg text-sm font-medium">
+          {getT('English').youWereKicked}
         </div>
       )}
-      <JoinRoom onJoin={handleJoin} onCreateRoom={handleCreateRoom} />
+      <JoinRoom
+        onJoin={handleJoin}
+        onCreateRoom={handleCreateRoom}
+        darkMode={darkMode}
+        onToggleDarkMode={toggleDarkMode}
+      />
     </>
   );
 }

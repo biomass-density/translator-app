@@ -25,7 +25,7 @@ async function translateText(text, targetLanguages) {
   return data;
 }
 
-export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, onLeave, onDelete, onKick }) {
+export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, darkMode, onLeave, onDelete, onKick }) {
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -145,20 +145,29 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
+  const headerBg = darkMode ? 'bg-[#1C1C1E] border-[#3A3A3C]' : 'bg-white border-[#E5E5E3]';
+  const headerText = darkMode ? 'text-white' : 'text-[#1C1C1E]';
+  const subText = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
+  const iconBtn = darkMode ? 'bg-[#2C2C2E] text-[#9B9B9B] hover:text-white' : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
+  const inputBarBg = darkMode ? 'bg-[#1C1C1E] border-[#3A3A3C]' : 'bg-white border-[#E5E5E3]';
+  const inputField = darkMode
+    ? 'bg-[#2C2C2E] text-white placeholder-[#6B6B6B]'
+    : 'bg-[#F2F2F0] text-[#1C1C1E] placeholder-[#9B9B9B]';
+
   return (
-    <div className="h-dvh bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex flex-col">
+    <div className={`h-dvh flex flex-col ${darkMode ? 'bg-[#1C1C1E]' : 'bg-[#FAFAF7]'}`}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/30 backdrop-blur-sm border-b border-white/10">
+      <div className={`flex-shrink-0 flex items-center justify-between px-4 py-3 border-b ${headerBg}`}>
         <div>
-          <h1 className="text-white font-bold text-lg leading-tight">#{roomId}</h1>
-          <p className="text-white/50 text-xs">{userLanguage}</p>
+          <h1 className={`font-bold text-base leading-tight ${headerText}`}>#{roomId}</h1>
+          <p className={`text-xs ${subText}`}>{userLanguage}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowParticipants(true)}
-            className="flex items-center gap-1 bg-white/10 hover:bg-white/20 text-white text-sm px-3 py-1.5 rounded-full transition-colors"
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
               <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
@@ -168,7 +177,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           {isOwner && (
             <button
               onClick={() => setShowDeleteModal(true)}
-              className="bg-white/10 hover:bg-red-500/30 text-white/70 hover:text-red-300 p-1.5 rounded-full transition-colors"
+              className={`p-1.5 rounded-full transition-colors hover:text-red-500 ${iconBtn}`}
               title={t.deleteRoom}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -176,10 +185,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               </svg>
             </button>
           )}
-          <button
-            onClick={onLeave}
-            className="text-red-300 hover:text-red-100 text-sm font-medium hover:underline transition-colors"
-          >
+          <button onClick={onLeave} className="text-red-500 hover:text-red-600 text-sm font-medium transition-colors">
             {t.leaveRoom}
           </button>
         </div>
@@ -193,24 +199,25 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         onLoadMore={loadMoreMessages}
         loadingMore={loadingMore}
         t={t}
+        darkMode={darkMode}
       />
 
-      {/* Input — owner only */}
+      {/* Input bar */}
       {isOwner ? (
-        <div className="flex-shrink-0 px-4 py-3 bg-black/30 backdrop-blur-sm border-t border-white/10">
-          {sendError && <p className="text-red-300 text-xs mb-2">{sendError}</p>}
+        <div className={`flex-shrink-0 px-4 py-3 border-t ${inputBarBg}`}>
+          {sendError && <p className="text-red-500 text-xs mb-2">{sendError}</p>}
           <form onSubmit={handleSend} className="flex items-center gap-2">
             <input
               type="text"
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={e => setNewMessage(e.target.value)}
               placeholder={`${t.typeMessage} (${userLanguage})`}
-              className="flex-1 bg-white/10 border border-white/20 rounded-full px-5 py-3 text-base text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/15"
+              className={`flex-1 rounded-full px-5 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputField}`}
             />
             <button
               type="submit"
               disabled={!newMessage.trim() || sendDisabled}
-              className="w-11 h-11 flex-shrink-0 bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-all active:scale-95"
+              className="w-11 h-11 flex-shrink-0 bg-green-500 hover:bg-green-600 active:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-colors"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <line x1="22" y1="2" x2="11" y2="13" />
@@ -220,8 +227,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           </form>
         </div>
       ) : (
-        <div className="flex-shrink-0 px-4 py-3 bg-black/30 backdrop-blur-sm border-t border-white/10">
-          <p className="text-center text-white/40 text-sm">{t.readOnlyHint}</p>
+        <div className={`flex-shrink-0 px-4 py-3 border-t ${inputBarBg}`}>
+          <p className={`text-center text-sm ${subText}`}>{t.readOnlyHint}</p>
         </div>
       )}
 
@@ -233,6 +240,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           onKick={onKick}
           onClose={() => setShowParticipants(false)}
           t={t}
+          darkMode={darkMode}
         />
       )}
 
@@ -241,6 +249,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           onConfirm={onDelete}
           onCancel={() => setShowDeleteModal(false)}
           t={t}
+          darkMode={darkMode}
         />
       )}
     </div>

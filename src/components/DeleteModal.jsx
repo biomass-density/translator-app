@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function DeleteModal({ onConfirm, onCancel, t }) {
+export default function DeleteModal({ onConfirm, onCancel, t, darkMode }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
@@ -16,14 +16,21 @@ export default function DeleteModal({ onConfirm, onCancel, t }) {
     }
   };
 
+  const cardBg = darkMode ? 'bg-[#2C2C2E]' : 'bg-white';
+  const textPrimary = darkMode ? 'text-white' : 'text-[#1C1C1E]';
+  const textSecondary = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
+  const cancelBtn = darkMode
+    ? 'bg-[#3A3A3C] text-[#9B9B9B] hover:text-white'
+    : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-white/20 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h2 className="text-white text-xl font-bold mb-3">{t.confirmDelete}</h2>
-        <p className="text-white/70 text-sm mb-6">{t.deleteConfirmMessage}</p>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className={`${cardBg} rounded-3xl p-6 w-full max-w-sm shadow-xl`}>
+        <h2 className={`font-bold text-lg mb-2 ${textPrimary}`}>{t.confirmDelete}</h2>
+        <p className={`text-sm mb-6 leading-relaxed ${textSecondary}`}>{t.deleteConfirmMessage}</p>
 
         {error && (
-          <div className="bg-red-500/20 border border-red-500/40 rounded-xl px-4 py-2 text-red-200 text-sm mb-4">
+          <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-2 text-red-600 text-sm mb-4">
             {error}
           </div>
         )}
@@ -32,14 +39,14 @@ export default function DeleteModal({ onConfirm, onCancel, t }) {
           <button
             onClick={onCancel}
             disabled={deleting}
-            className="flex-1 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white py-2 rounded-xl transition-colors"
+            className={`flex-1 py-3 rounded-2xl font-semibold text-sm transition-colors disabled:opacity-50 ${cancelBtn}`}
           >
             {t.cancel}
           </button>
           <button
             onClick={handleConfirm}
             disabled={deleting}
-            className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 rounded-xl transition-colors font-semibold"
+            className="flex-1 py-3 rounded-2xl font-semibold text-sm bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {deleting ? t.deleting : t.delete}
           </button>
