@@ -88,7 +88,7 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t.yourNamePlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-base text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
               required
             />
           </div>
@@ -100,7 +100,7 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
               placeholder={t.roomIdPlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-base text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
               required
             />
           </div>
@@ -112,7 +112,7 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t.passwordPlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-base text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
               required
             />
           </div>

@@ -144,7 +144,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex flex-col">
+    <div className="h-dvh bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/30 backdrop-blur-sm border-b border-white/10">
         <div>
@@ -193,31 +193,35 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         t={t}
       />
 
-      {/* Input */}
-      <div className="px-4 py-3 bg-black/30 backdrop-blur-sm border-t border-white/10">
-        {sendError && (
-          <p className="text-red-300 text-xs mb-2">{sendError}</p>
-        )}
-        <form onSubmit={handleSend} className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder={`${t.typeMessage} (${userLanguage})`}
-            className="flex-1 bg-white/10 border border-white/20 rounded-full px-5 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/15 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!newMessage.trim() || sendDisabled}
-            className="w-11 h-11 flex-shrink-0 bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-all active:scale-95"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        </form>
-      </div>
+      {/* Input — owner only */}
+      {isOwner ? (
+        <div className="flex-shrink-0 px-4 py-3 bg-black/30 backdrop-blur-sm border-t border-white/10">
+          {sendError && <p className="text-red-300 text-xs mb-2">{sendError}</p>}
+          <form onSubmit={handleSend} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              placeholder={`${t.typeMessage} (${userLanguage})`}
+              className="flex-1 bg-white/10 border border-white/20 rounded-full px-5 py-3 text-base text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/15"
+            />
+            <button
+              type="submit"
+              disabled={!newMessage.trim() || sendDisabled}
+              className="w-11 h-11 flex-shrink-0 bg-gradient-to-br from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-all active:scale-95"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </form>
+        </div>
+      ) : (
+        <div className="flex-shrink-0 px-4 py-3 bg-black/30 backdrop-blur-sm border-t border-white/10">
+          <p className="text-center text-white/40 text-sm">{t.readOnlyHint}</p>
+        </div>
+      )}
 
       {showParticipants && (
         <ParticipantsPanel
