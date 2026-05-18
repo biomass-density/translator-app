@@ -16,12 +16,12 @@ export default function DeleteModal({ onConfirm, onCancel, t, darkMode }) {
     }
   };
 
-  const cardBg = darkMode ? 'bg-[#2C2C2E]' : 'bg-white';
-  const textPrimary = darkMode ? 'text-white' : 'text-[#1C1C1E]';
-  const textSecondary = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
+  const cardBg = darkMode ? 'bg-[#1A1A1A]' : 'bg-[#FFFFFF]';
+  const textPrimary = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
+  const textSecondary = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
   const cancelBtn = darkMode
-    ? 'bg-[#3A3A3C] text-[#9B9B9B] hover:text-white'
-    : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
+    ? 'bg-[#272727] text-[#888888] hover:text-[#F5F5F5]'
+    : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -30,7 +30,7 @@ export default function DeleteModal({ onConfirm, onCancel, t, darkMode }) {
         <p className={`text-sm mb-6 leading-relaxed ${textSecondary}`}>{t.deleteConfirmMessage}</p>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-2 text-red-600 text-sm mb-4">
+          <div className={`rounded-2xl px-4 py-2 text-red-500 text-sm border border-red-500/20 mb-4 ${darkMode ? 'bg-red-500/10' : 'bg-red-50'}`}>
             {error}
           </div>
         )}

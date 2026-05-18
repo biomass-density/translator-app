@@ -20,6 +20,7 @@ import ChatRoom from './components/ChatRoom.jsx';
 
 const SESSION_KEY = 'babelchat_session';
 const THEME_KEY = 'babelchat_theme';
+const MY_ROOMS_KEY = 'babelchat_my_rooms';
 
 export default function App() {
   const [userId, setUserId] = useState(null);
@@ -29,6 +30,17 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem(THEME_KEY) === 'dark'
   );
+  const [myRooms, setMyRooms] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(MY_ROOMS_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [prefilledRoomId] = useState(() => {
+    const path = window.location.pathname.slice(1).trim();
+    return path || '';
+  });
 
   const toggleDarkMode = () => {
     setDarkMode(prev => {
@@ -82,10 +94,19 @@ export default function App() {
 
       const isOwner = roomSnap.data().createdBy === uid;
       setSession({ roomId, userName, userLanguage, isOwner });
+      window.history.pushState(null, '', '/' + roomId);
     } catch (err) {
       console.error('Session restore error:', err);
       localStorage.removeItem(SESSION_KEY);
     }
+  }
+
+  function saveMyRoom(roomId, password) {
+    setMyRooms(prev => {
+      const updated = { ...prev, [roomId]: { password, createdAt: Date.now() } };
+      localStorage.setItem(MY_ROOMS_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }
 
   async function handleJoin({ roomId, name, password, language }) {
@@ -113,6 +134,7 @@ export default function App() {
     localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
     setKicked(false);
     setSession(newSession);
+    window.history.pushState(null, '', '/' + roomId);
   }
 
   async function handleCreateRoom({ roomId, name, password, language }) {
@@ -136,8 +158,10 @@ export default function App() {
 
     const newSession = { roomId, userName: name, userLanguage: language, isOwner: true };
     localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
+    saveMyRoom(roomId, password);
     setKicked(false);
     setSession(newSession);
+    window.history.pushState(null, '', '/' + roomId);
   }
 
   async function handleLeaveRoom() {
@@ -155,6 +179,7 @@ export default function App() {
     } finally {
       localStorage.removeItem(SESSION_KEY);
       setSession(null);
+      window.history.pushState(null, '', '/');
     }
   }
 
@@ -172,8 +197,15 @@ export default function App() {
     batch.delete(doc(db, 'rooms', roomId));
     await batch.commit();
 
+    setMyRooms(prev => {
+      const updated = { ...prev };
+      delete updated[roomId];
+      localStorage.setItem(MY_ROOMS_KEY, JSON.stringify(updated));
+      return updated;
+    });
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
+    window.history.pushState(null, '', '/');
   }
 
   async function handleKickParticipant(kickedUserId, kickedUserName) {
@@ -187,8 +219,47 @@ export default function App() {
     });
   }
 
-  const bg = darkMode ? 'bg-[#1C1C1E]' : 'bg-[#FAFAF7]';
-  const text = darkMode ? 'text-white' : 'text-[#1C1C1E]';
+  async function handleDeleteMyRoom(roomId) {
+    try {
+      const batch = writeBatch(db);
+      const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
+      msgsSnap.forEach(d => batch.delete(d.ref));
+      const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
+      partsSnap.forEach(d => batch.delete(d.ref));
+      batch.delete(doc(db, 'rooms', roomId));
+      await batch.commit();
+    } catch (err) {
+      console.error('Delete my room error:', err);
+    }
+    setMyRooms(prev => {
+      const updated = { ...prev };
+      delete updated[roomId];
+      localStorage.setItem(MY_ROOMS_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  async function handleDeleteAllMyRooms() {
+    const roomIds = Object.keys(myRooms);
+    for (const roomId of roomIds) {
+      try {
+        const batch = writeBatch(db);
+        const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
+        msgsSnap.forEach(d => batch.delete(d.ref));
+        const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
+        partsSnap.forEach(d => batch.delete(d.ref));
+        batch.delete(doc(db, 'rooms', roomId));
+        await batch.commit();
+      } catch (err) {
+        console.error('Delete room error for', roomId, ':', err);
+      }
+    }
+    localStorage.removeItem(MY_ROOMS_KEY);
+    setMyRooms({});
+  }
+
+  const bg = darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]';
+  const text = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
 
   if (!authReady) {
     return (
@@ -226,6 +297,10 @@ export default function App() {
         onCreateRoom={handleCreateRoom}
         darkMode={darkMode}
         onToggleDarkMode={toggleDarkMode}
+        myRooms={myRooms}
+        onDeleteMyRoom={handleDeleteMyRoom}
+        onDeleteAllMyRooms={handleDeleteAllMyRooms}
+        prefilledRoomId={prefilledRoomId}
       />
     </>
   );

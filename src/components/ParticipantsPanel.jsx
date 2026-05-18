@@ -17,11 +17,12 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
     }
   };
 
-  const panelBg = darkMode ? 'bg-[#2C2C2E]' : 'bg-white';
-  const textPrimary = darkMode ? 'text-white' : 'text-[#1C1C1E]';
-  const textSecondary = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
-  const divider = darkMode ? 'divide-[#3A3A3C]' : 'divide-[#F2F2F0]';
-  const closeBtn = darkMode ? 'bg-[#3A3A3C] text-[#9B9B9B] hover:text-white' : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
+  const panelBg = darkMode ? 'bg-[#1A1A1A]' : 'bg-[#FFFFFF]';
+  const textPrimary = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
+  const textSecondary = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
+  const divider = darkMode ? 'divide-[#2A2A2A]' : 'divide-[#F0F0F0]';
+  const closeBtn = darkMode ? 'bg-[#272727] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
+  const avatarBg = darkMode ? 'bg-[#333333] text-[#F5F5F5]' : 'bg-[#0A0A0A] text-[#FFFFFF]';
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-40 p-4">
@@ -48,7 +49,7 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
           {participants.map(p => (
             <li key={p.id} className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-sm uppercase">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm uppercase ${avatarBg}`}>
                   {p.name.charAt(0)}
                 </div>
                 <div>

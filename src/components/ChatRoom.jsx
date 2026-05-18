@@ -43,7 +43,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const participantsRef = useRef(participants);
   useEffect(() => { participantsRef.current = participants; }, [participants]);
 
-  // Watch for room deletion or being kicked (both trigger onLeave(true))
+  // Watch for room deletion or being kicked
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
     const unsubRoom = onSnapshot(roomRef, (s) => {
@@ -145,17 +145,20 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
-  const headerBg = darkMode ? 'bg-[#1C1C1E] border-[#3A3A3C]' : 'bg-white border-[#E5E5E3]';
-  const headerText = darkMode ? 'text-white' : 'text-[#1C1C1E]';
-  const subText = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
-  const iconBtn = darkMode ? 'bg-[#2C2C2E] text-[#9B9B9B] hover:text-white' : 'bg-[#F2F2F0] text-[#6B6B6B] hover:text-[#1C1C1E]';
-  const inputBarBg = darkMode ? 'bg-[#1C1C1E] border-[#3A3A3C]' : 'bg-white border-[#E5E5E3]';
+  const headerBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
+  const headerText = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
+  const subText = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
+  const iconBtn = darkMode ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
+  const inputBarBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
   const inputField = darkMode
-    ? 'bg-[#2C2C2E] text-white placeholder-[#6B6B6B]'
-    : 'bg-[#F2F2F0] text-[#1C1C1E] placeholder-[#9B9B9B]';
+    ? 'bg-[#1A1A1A] text-[#F5F5F5] placeholder-[#555555]'
+    : 'bg-[#F2F2F2] text-[#0A0A0A] placeholder-[#AAAAAA]';
+  const sendBtn = darkMode
+    ? 'bg-[#F5F5F5] hover:bg-[#DDDDDD] active:bg-[#CCCCCC] text-[#0A0A0A]'
+    : 'bg-[#0A0A0A] hover:bg-[#333333] active:bg-[#555555] text-[#FFFFFF]';
 
   return (
-    <div className={`h-dvh flex flex-col ${darkMode ? 'bg-[#1C1C1E]' : 'bg-[#FAFAF7]'}`}>
+    <div className={`h-dvh flex flex-col ${darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]'}`}>
       {/* Header */}
       <div className={`flex-shrink-0 flex items-center justify-between px-4 py-3 border-b ${headerBg}`}>
         <div>
@@ -212,12 +215,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               value={newMessage}
               onChange={e => setNewMessage(e.target.value)}
               placeholder={`${t.typeMessage} (${userLanguage})`}
-              className={`flex-1 rounded-full px-5 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputField}`}
+              className={`flex-1 rounded-full px-5 py-3 text-base focus:outline-none ${inputField}`}
             />
             <button
               type="submit"
               disabled={!newMessage.trim() || sendDisabled}
-              className="w-11 h-11 flex-shrink-0 bg-green-500 hover:bg-green-600 active:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-colors"
+              className={`w-11 h-11 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors ${sendBtn}`}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <line x1="22" y1="2" x2="11" y2="13" />

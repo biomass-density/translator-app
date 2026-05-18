@@ -25,26 +25,56 @@ function MoonIcon() {
   );
 }
 
-export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkMode }) {
-  const [roomId, setRoomId] = useState('');
+export default function JoinRoom({
+  onJoin, onCreateRoom, darkMode, onToggleDarkMode,
+  myRooms, onDeleteMyRoom, onDeleteAllMyRooms, prefilledRoomId,
+}) {
+  const [roomId, setRoomId] = useState(prefilledRoomId || '');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [language, setLanguage] = useState(LANGUAGES[0].name);
   const [isCreating, setIsCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   const t = getT(language);
+  const myRoomsList = Object.entries(myRooms || {}).sort((a, b) => b[1].createdAt - a[1].createdAt);
 
-  // Theme-aware class shortcuts
-  const bg = darkMode ? 'bg-[#1C1C1E]' : 'bg-[#FAFAF7]';
-  const cardBg = darkMode ? 'bg-[#2C2C2E]' : 'bg-white';
-  const textPrimary = darkMode ? 'text-white' : 'text-[#1C1C1E]';
-  const textSecondary = darkMode ? 'text-[#9B9B9B]' : 'text-[#6B6B6B]';
-  const inputBg = darkMode ? 'bg-[#1C1C1E] border-[#3A3A3C] text-white placeholder-[#6B6B6B]' : 'bg-[#F2F2F0] border-transparent text-[#1C1C1E] placeholder-[#9B9B9B]';
-  const tabActive = darkMode ? 'bg-[#1C1C1E] text-white' : 'bg-[#F2F2F0] text-[#1C1C1E]';
-  const tabInactive = darkMode ? 'text-[#9B9B9B] hover:text-white' : 'text-[#9B9B9B] hover:text-[#1C1C1E]';
-  const toggleBg = darkMode ? 'bg-[#2C2C2E] text-[#9B9B9B] hover:text-white' : 'bg-white text-[#6B6B6B] hover:text-[#1C1C1E]';
+  const bg = darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]';
+  const cardBg = darkMode ? 'bg-[#1A1A1A]' : 'bg-[#FFFFFF]';
+  const textPrimary = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
+  const textSecondary = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
+  const inputBg = darkMode
+    ? 'bg-[#272727] border-[#333333] text-[#F5F5F5] placeholder-[#555555]'
+    : 'bg-[#F2F2F2] border-transparent text-[#0A0A0A] placeholder-[#AAAAAA]';
+  const tabContainerBg = darkMode ? 'bg-[#0A0A0A]' : 'bg-[#F0F0F0]';
+  const tabActive = darkMode ? 'bg-[#272727] text-[#F5F5F5]' : 'bg-[#FFFFFF] text-[#0A0A0A]';
+  const tabInactive = darkMode ? 'text-[#666666] hover:text-[#F5F5F5]' : 'text-[#999999] hover:text-[#0A0A0A]';
+  const toggleBg = darkMode
+    ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5] border-[#2A2A2A]'
+    : 'bg-[#FFFFFF] text-[#666666] hover:text-[#0A0A0A] border-[#E5E5E5]';
+  const primaryBtn = darkMode
+    ? 'bg-[#F5F5F5] hover:bg-[#DDDDDD] active:bg-[#CCCCCC] text-[#0A0A0A]'
+    : 'bg-[#0A0A0A] hover:bg-[#333333] active:bg-[#555555] text-[#FFFFFF]';
+  const cancelBtn = darkMode
+    ? 'bg-[#272727] text-[#888888] hover:text-[#F5F5F5]'
+    : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
+  const borderColor = darkMode ? 'border-[#2A2A2A]' : 'border-[#E5E5E5]';
+  const chevronColor = darkMode ? 'text-[#888888]' : 'text-[#666666]';
+  const roomItemBg = darkMode ? 'bg-[#272727]' : 'bg-[#F2F2F2]';
+  const rejoinColor = darkMode ? 'text-[#888888] hover:text-[#F5F5F5]' : 'text-[#6B6B6B] hover:text-[#0A0A0A]';
+
+  function handleRejoin(rId, rPassword) {
+    setRoomId(rId);
+    setPassword(rPassword);
+    setIsCreating(false);
+  }
+
+  async function handleDeleteAll() {
+    await onDeleteAllMyRooms();
+    setConfirmDeleteAll(false);
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -68,10 +98,9 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
   return (
     <div className={`min-h-screen ${bg} flex items-center justify-center p-4 relative`}>
 
-      {/* Dark mode toggle — top right */}
       <button
         onClick={onToggleDarkMode}
-        className={`absolute top-4 right-4 p-2 rounded-full ${toggleBg} transition-colors shadow-sm`}
+        className={`absolute top-4 right-4 p-2 rounded-full border transition-colors shadow-sm ${toggleBg}`}
         aria-label="Toggle dark mode"
       >
         {darkMode ? <SunIcon /> : <MoonIcon />}
@@ -79,15 +108,12 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
 
       <div className={`${cardBg} rounded-3xl p-8 w-full max-w-sm shadow-sm`}>
 
-        {/* Logo */}
         <div className="text-center mb-7">
-          <div className="text-4xl mb-2">🌐</div>
           <h1 className={`text-2xl font-bold ${textPrimary} tracking-tight`}>{t.appTitle}</h1>
           <p className={`text-sm mt-1 ${textSecondary}`}>{t.appSubtitle}</p>
         </div>
 
-        {/* Join / Create tabs */}
-        <div className={`flex rounded-2xl p-1 mb-6 ${darkMode ? 'bg-[#1C1C1E]' : 'bg-[#F2F2F0]'}`}>
+        <div className={`flex rounded-2xl p-1 mb-6 ${tabContainerBg}`}>
           <button
             type="button"
             onClick={() => setIsCreating(false)}
@@ -105,18 +131,24 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
-          {/* Language — first so the rest of the form changes language immediately */}
           <div>
             <label className={`block text-xs font-semibold uppercase tracking-wide mb-1.5 ${textSecondary}`}>{t.language}</label>
-            <select
-              value={language}
-              onChange={e => setLanguage(e.target.value)}
-              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputBg}`}
-            >
-              {LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.name}>{lang.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={language}
+                onChange={e => setLanguage(e.target.value)}
+                className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none appearance-none ${inputBg}`}
+              >
+                {LANGUAGES.map(lang => (
+                  <option key={lang.code} value={lang.name}>{lang.name}</option>
+                ))}
+              </select>
+              <div className={`pointer-events-none absolute inset-y-0 right-4 flex items-center ${chevronColor}`}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -126,7 +158,7 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder={t.yourNamePlaceholder}
-              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputBg}`}
+              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none ${inputBg}`}
               required
             />
           </div>
@@ -138,7 +170,7 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
               value={roomId}
               onChange={e => setRoomId(e.target.value)}
               placeholder={t.roomIdPlaceholder}
-              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputBg}`}
+              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none ${inputBg}`}
               required
             />
           </div>
@@ -150,13 +182,13 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder={t.passwordPlaceholder}
-              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-green-500 ${inputBg}`}
+              className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none ${inputBg}`}
               required
             />
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-red-600 text-sm">
+            <div className={`rounded-2xl px-4 py-3 text-red-500 text-sm border border-red-500/20 ${darkMode ? 'bg-red-500/10' : 'bg-red-50'}`}>
               {error}
             </div>
           )}
@@ -164,14 +196,74 @@ export default function JoinRoom({ onJoin, onCreateRoom, darkMode, onToggleDarkM
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-green-500 hover:bg-green-600 active:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-2xl transition-colors mt-2 text-base"
+            className={`w-full disabled:opacity-50 disabled:cursor-not-allowed font-semibold py-3.5 rounded-2xl transition-colors mt-2 text-base ${primaryBtn}`}
           >
             {loading
               ? (isCreating ? t.creating : t.joining)
               : (isCreating ? t.createRoom : t.joinRoom)}
           </button>
         </form>
+
+        {myRoomsList.length > 0 && (
+          <div className={`mt-6 pt-6 border-t ${borderColor}`}>
+            <div className="flex items-center justify-between mb-3">
+              <span className={`text-xs font-semibold uppercase tracking-wide ${textSecondary}`}>{t.myRooms}</span>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteAll(true)}
+                className="text-xs font-medium text-red-500 hover:text-red-600 transition-colors"
+              >
+                {t.deleteAll}
+              </button>
+            </div>
+            <ul className="space-y-2">
+              {myRoomsList.map(([rId, rData]) => (
+                <li key={rId} className={`flex items-center justify-between px-3 py-2.5 rounded-2xl ${roomItemBg}`}>
+                  <span className={`text-sm font-medium ${textPrimary} truncate`}>#{rId}</span>
+                  <div className="flex items-center gap-3 ml-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleRejoin(rId, rData.password)}
+                      className={`text-xs font-semibold transition-colors ${rejoinColor}`}
+                    >
+                      {t.rejoin}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteMyRoom(rId)}
+                      className="text-xs font-medium text-red-500 hover:text-red-600 transition-colors"
+                    >
+                      {t.delete}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
+
+      {confirmDeleteAll && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className={`${cardBg} rounded-3xl p-6 w-full max-w-sm shadow-xl`}>
+            <p className={`text-sm mb-6 leading-relaxed ${textSecondary}`}>{t.deleteAllConfirm}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDeleteAll(false)}
+                className={`flex-1 py-3 rounded-2xl font-semibold text-sm transition-colors ${cancelBtn}`}
+              >
+                {t.cancel}
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                className="flex-1 py-3 rounded-2xl font-semibold text-sm bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >
+                {t.deleteAll}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
