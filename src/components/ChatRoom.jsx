@@ -128,11 +128,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         try {
           const result = await translateText(text, targetLanguages);
           const translations = result.translations ?? {};
-          if (Object.keys(translations).length > 0) {
-            await setDoc(newMsgRef, { translations }, { merge: true });
-          }
+          await setDoc(newMsgRef, { translations }, { merge: true });
         } catch (translateErr) {
           console.error('Translation error:', translateErr);
+          // Mark as failed so recipients don't see "Translating..." forever
+          await setDoc(newMsgRef, { translationFailed: true }, { merge: true }).catch(() => {});
         }
       }
     } catch (err) {

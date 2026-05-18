@@ -88,6 +88,10 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
                     <p className="text-sm leading-relaxed text-white/80">{msg.text}</p>
                   </div>
                 </>
+              ) : !isOwn && msg.originalLanguage !== userLanguage && msg.translationFailed ? (
+                <p className="text-sm leading-relaxed text-red-300/70 italic">
+                  {UI_STRINGS.translationUnavailable}
+                </p>
               ) : !isOwn && msg.originalLanguage !== userLanguage && !translation ? (
                 <p className="text-sm leading-relaxed text-white/50 italic">
                   {UI_STRINGS.translating}

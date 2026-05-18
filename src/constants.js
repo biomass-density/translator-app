@@ -5,11 +5,13 @@ export const LANGUAGES = [
   { code: 'es', name: 'Spanish' },
   { code: 'fr', name: 'French' },
   { code: 'de', name: 'German' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'it', name: 'Italian' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'ru', name: 'Russian' },
   { code: 'zh', name: 'Chinese' },
   { code: 'ja', name: 'Japanese' },
   { code: 'ko', name: 'Korean' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'ru', name: 'Russian' },
   { code: 'ar', name: 'Arabic' },
 ];
 
@@ -42,6 +44,7 @@ export const UI_STRINGS = {
   deleting: 'Deleting...',
   typeMessage: 'Type a message...',
   translating: 'Translating...',
+  translationUnavailable: 'Translation unavailable',
   originalText: 'Original',
   loadEarlier: 'Load earlier messages',
   loading: 'Loading...',
