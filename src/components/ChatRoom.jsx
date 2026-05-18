@@ -3,8 +3,7 @@ import {
   collection, doc, setDoc, onSnapshot,
   query, orderBy, limit, startAfter, getDocs
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../firebase.js';
+import { db } from '../firebase.js';
 import { UI_STRINGS } from '../constants.js';
 import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
@@ -13,7 +12,15 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
-const translateFn = httpsCallable(functions, 'translate');
+async function translateText(text, targetLanguages) {
+  const res = await fetch('/api/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, targetLanguages }),
+  });
+  if (!res.ok) throw new Error('Translation request failed');
+  return res.json();
+}
 
 export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, onLeave, onDelete, onKick }) {
   const [messages, setMessages] = useState([]);
@@ -119,8 +126,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
       if (targetLanguages.length > 0) {
         try {
-          const result = await translateFn({ text, targetLanguages });
-          const translations = result.data?.translations ?? {};
+          const result = await translateText(text, targetLanguages);
+          const translations = result.translations ?? {};
           if (Object.keys(translations).length > 0) {
             await setDoc(newMsgRef, { translations }, { merge: true });
           }
