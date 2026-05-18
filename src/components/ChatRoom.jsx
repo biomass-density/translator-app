@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   collection, doc, setDoc, onSnapshot,
   query, orderBy, limit, startAfter, getDocs
@@ -35,12 +35,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
     const unsubRoom = onSnapshot(roomRef, (s) => {
-      if (!s.exists()) onLeave(true);
+      if (!s.exists()) onLeave();
     }, (err) => console.error('Room watch error:', err));
 
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
-      if (!s.exists()) onLeave(true);
+      if (!s.exists()) onLeave();
     }, (err) => console.error('Participant watch error:', err));
 
     return () => { unsubRoom(); unsubMe(); };
@@ -166,7 +166,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             </button>
           )}
           <button
-            onClick={() => onLeave(false)}
+            onClick={onLeave}
             className="text-red-300 hover:text-red-100 text-sm font-medium hover:underline transition-colors"
           >
             {UI_STRINGS.leaveRoom}
