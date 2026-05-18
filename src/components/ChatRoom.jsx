@@ -18,8 +18,11 @@ async function translateText(text, targetLanguages) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, targetLanguages }),
   });
-  if (!res.ok) throw new Error('Translation request failed');
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Translation request failed');
+  }
+  return data;
 }
 
 export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, onLeave, onDelete, onKick }) {
@@ -132,8 +135,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           const translations = result.translations ?? {};
           await setDoc(newMsgRef, { translations }, { merge: true });
         } catch (translateErr) {
-          console.error('Translation error:', translateErr);
-          // Mark as failed so recipients don't see "Translating..." forever
+          console.error('Translation failed —', translateErr.message);
           await setDoc(newMsgRef, { translationFailed: true }, { merge: true }).catch(() => {});
         }
       }
