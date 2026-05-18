@@ -78,13 +78,22 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
                 </div>
               )}
 
-              <p className="text-sm leading-relaxed">{msg.text}</p>
-
-              {showTranslation && (
-                <div className="mt-2 pt-2 border-t border-white/20">
-                  <p className="text-xs text-white/60 mb-0.5">{UI_STRINGS.originalText}</p>
-                  <p className="text-sm leading-relaxed text-white/80">{translation}</p>
-                </div>
+              {showTranslation ? (
+                <>
+                  <p className="text-sm leading-relaxed">{translation}</p>
+                  <div className="mt-2 pt-2 border-t border-white/20">
+                    <p className="text-xs text-white/60 mb-0.5">
+                      {UI_STRINGS.originalText} ({msg.originalLanguage})
+                    </p>
+                    <p className="text-sm leading-relaxed text-white/80">{msg.text}</p>
+                  </div>
+                </>
+              ) : !isOwn && msg.originalLanguage !== userLanguage && !translation ? (
+                <p className="text-sm leading-relaxed text-white/50 italic">
+                  {UI_STRINGS.translating}
+                </p>
+              ) : (
+                <p className="text-sm leading-relaxed">{msg.text}</p>
               )}
 
               <div
