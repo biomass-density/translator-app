@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LANGUAGES, UI_STRINGS } from '../constants.js';
+import { LANGUAGES, getT } from '../constants.js';
 
 export default function JoinRoom({ onJoin, onCreateRoom }) {
   const [roomId, setRoomId] = useState('');
@@ -9,6 +9,9 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
   const [isCreating, setIsCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // UI strings switch instantly as the user changes the language dropdown
+  const t = getT(language);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,7 +26,7 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
       }
     } catch (err) {
       console.error('JoinRoom error:', err);
-      setError(err.message || (isCreating ? UI_STRINGS.errorCreating : UI_STRINGS.errorJoining));
+      setError(err.message || (isCreating ? t.errorCreating : t.errorJoining));
     } finally {
       setLoading(false);
     }
@@ -33,8 +36,8 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center p-4">
       <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 w-full max-w-md shadow-2xl border border-white/20">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">🌐 {UI_STRINGS.appTitle}</h1>
-          <p className="text-white/70">{UI_STRINGS.appSubtitle}</p>
+          <h1 className="text-4xl font-bold text-white mb-2">🌐 {t.appTitle}</h1>
+          <p className="text-white/70">{t.appSubtitle}</p>
         </div>
 
         <div className="flex rounded-xl overflow-hidden mb-6 border border-white/20">
@@ -47,7 +50,7 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
                 : 'text-white/60 hover:text-white hover:bg-white/10'
             }`}
           >
-            {UI_STRINGS.joinRoom}
+            {t.joinRoom}
           </button>
           <button
             type="button"
@@ -58,49 +61,13 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
                 : 'text-white/60 hover:text-white hover:bg-white/10'
             }`}
           >
-            {UI_STRINGS.createRoom}
+            {t.createRoom}
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-white/80 text-sm mb-1">{UI_STRINGS.roomId}</label>
-            <input
-              type="text"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              placeholder={UI_STRINGS.roomIdPlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-white/80 text-sm mb-1">{UI_STRINGS.yourName}</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={UI_STRINGS.yourNamePlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-white/80 text-sm mb-1">{UI_STRINGS.password}</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={UI_STRINGS.passwordPlaceholder}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-white/80 text-sm mb-1">{UI_STRINGS.language}</label>
+            <label className="block text-white/80 text-sm mb-1">{t.language}</label>
             <select
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
@@ -112,6 +79,42 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-white/80 text-sm mb-1">{t.yourName}</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t.yourNamePlaceholder}
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-white/80 text-sm mb-1">{t.roomId}</label>
+            <input
+              type="text"
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+              placeholder={t.roomIdPlaceholder}
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-white/80 text-sm mb-1">{t.password}</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t.passwordPlaceholder}
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/20"
+              required
+            />
           </div>
 
           {error && (
@@ -126,12 +129,8 @@ export default function JoinRoom({ onJoin, onCreateRoom }) {
             className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all shadow-lg"
           >
             {loading
-              ? isCreating
-                ? UI_STRINGS.creating
-                : UI_STRINGS.joining
-              : isCreating
-              ? UI_STRINGS.createRoom
-              : UI_STRINGS.joinRoom}
+              ? isCreating ? t.creating : t.joining
+              : isCreating ? t.createRoom : t.joinRoom}
           </button>
         </form>
       </div>

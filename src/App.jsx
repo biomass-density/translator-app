@@ -14,7 +14,9 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebase.js';
 import { hashPassword } from './crypto.js';
-import { UI_STRINGS } from './constants.js';
+import { getT } from './constants.js';
+
+const t = getT('English');
 import JoinRoom from './components/JoinRoom.jsx';
 import ChatRoom from './components/ChatRoom.jsx';
 
@@ -86,12 +88,12 @@ export default function App() {
     const roomSnap = await getDoc(roomRef);
 
     if (!roomSnap.exists()) {
-      throw new Error(UI_STRINGS.roomNotFound);
+      throw new Error(t.roomNotFound);
     }
 
     const roomData = roomSnap.data();
     if (roomData.passwordHash !== hash) {
-      throw new Error(UI_STRINGS.wrongPassword);
+      throw new Error(t.wrongPassword);
     }
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
@@ -227,7 +229,7 @@ export default function App() {
   if (!authReady) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 flex items-center justify-center">
-        <div className="text-white text-xl">{UI_STRINGS.loading}</div>
+        <div className="text-white text-xl">{t.loading}</div>
       </div>
     );
   }
@@ -251,7 +253,7 @@ export default function App() {
     <>
       {kicked && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium">
-          {UI_STRINGS.youWereKicked}
+          {t.youWereKicked}
         </div>
       )}
       <JoinRoom onJoin={handleJoin} onCreateRoom={handleCreateRoom} />

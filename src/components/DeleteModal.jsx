@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { UI_STRINGS } from '../constants.js';
 
-export default function DeleteModal({ onConfirm, onCancel }) {
+export default function DeleteModal({ onConfirm, onCancel, t }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
@@ -11,8 +10,8 @@ export default function DeleteModal({ onConfirm, onCancel }) {
     try {
       await onConfirm();
     } catch (err) {
-      console.error('DeleteModal confirm error:', err);
-      setError(err.message || UI_STRINGS.errorDeleting);
+      console.error('Delete room error:', err);
+      setError(err.message || t.errorDeleting);
       setDeleting(false);
     }
   };
@@ -20,8 +19,8 @@ export default function DeleteModal({ onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-gray-900 border border-white/20 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-        <h2 className="text-white text-xl font-bold mb-3">{UI_STRINGS.confirmDelete}</h2>
-        <p className="text-white/70 text-sm mb-6">{UI_STRINGS.deleteConfirmMessage}</p>
+        <h2 className="text-white text-xl font-bold mb-3">{t.confirmDelete}</h2>
+        <p className="text-white/70 text-sm mb-6">{t.deleteConfirmMessage}</p>
 
         {error && (
           <div className="bg-red-500/20 border border-red-500/40 rounded-xl px-4 py-2 text-red-200 text-sm mb-4">
@@ -35,14 +34,14 @@ export default function DeleteModal({ onConfirm, onCancel }) {
             disabled={deleting}
             className="flex-1 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white py-2 rounded-xl transition-colors"
           >
-            {UI_STRINGS.cancel}
+            {t.cancel}
           </button>
           <button
             onClick={handleConfirm}
             disabled={deleting}
             className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-2 rounded-xl transition-colors font-semibold"
           >
-            {deleting ? UI_STRINGS.deleting : UI_STRINGS.delete}
+            {deleting ? t.deleting : t.delete}
           </button>
         </div>
       </div>

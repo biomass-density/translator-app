@@ -4,7 +4,7 @@ import {
   query, orderBy, limit, startAfter, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
-import { UI_STRINGS } from '../constants.js';
+import { getT } from '../constants.js';
 import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
 import DeleteModal from './DeleteModal.jsx';
@@ -33,6 +33,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastVisible, setLastVisible] = useState(null);
+
+  const t = getT(userLanguage);
 
   // Ref keeps target-language list current inside async handleSend without stale closure
   const participantsRef = useRef(participants);
@@ -137,7 +139,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       }
     } catch (err) {
       console.error('Send error:', err);
-      setSendError(UI_STRINGS.errorSending);
+      setSendError(t.errorSending);
     }
   };
 
@@ -165,7 +167,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             <button
               onClick={() => setShowDeleteModal(true)}
               className="bg-white/10 hover:bg-red-500/30 text-white/70 hover:text-red-300 p-1.5 rounded-full transition-colors"
-              title={UI_STRINGS.deleteRoom}
+              title={t.deleteRoom}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -176,7 +178,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             onClick={onLeave}
             className="text-red-300 hover:text-red-100 text-sm font-medium hover:underline transition-colors"
           >
-            {UI_STRINGS.leaveRoom}
+            {t.leaveRoom}
           </button>
         </div>
       </div>
@@ -188,6 +190,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         hasMore={hasMore}
         onLoadMore={loadMoreMessages}
         loadingMore={loadingMore}
+        t={t}
       />
 
       {/* Input */}
@@ -200,7 +203,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             type="text"
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            placeholder={`${UI_STRINGS.typeMessage} (${userLanguage})`}
+            placeholder={`${t.typeMessage} (${userLanguage})`}
             className="flex-1 bg-white/10 border border-white/20 rounded-full px-5 py-3 text-white placeholder-white/40 focus:outline-none focus:border-white/50 focus:bg-white/15 text-sm"
           />
           <button
@@ -223,6 +226,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           currentUserId={userId}
           onKick={onKick}
           onClose={() => setShowParticipants(false)}
+          t={t}
         />
       )}
 
@@ -230,6 +234,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         <DeleteModal
           onConfirm={onDelete}
           onCancel={() => setShowDeleteModal(false)}
+          t={t}
         />
       )}
     </div>

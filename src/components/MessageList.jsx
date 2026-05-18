@@ -1,31 +1,23 @@
 import React, { useEffect, useRef } from 'react';
-import { UI_STRINGS } from '../constants.js';
 
 function formatTime(timestamp) {
   if (!timestamp) return '';
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function MessageList({ messages, currentUserId, userLanguage, hasMore, onLoadMore, loadingMore }) {
+export default function MessageList({ messages, currentUserId, userLanguage, hasMore, onLoadMore, loadingMore, t }) {
   const bottomRef = useRef(null);
-  const containerRef = useRef(null);
   const prevLengthRef = useRef(messages.length);
 
   useEffect(() => {
-    // Auto-scroll to bottom only when new messages arrive (not when loading earlier)
-    if (messages.length > prevLengthRef.current) {
-      const added = messages.length - prevLengthRef.current;
-      // If messages were appended at the end (new messages), scroll to bottom
-      if (added <= 5) {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
+    if (messages.length > prevLengthRef.current && messages.length - prevLengthRef.current <= 5) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     prevLengthRef.current = messages.length;
   }, [messages.length]);
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+    <div className="flex-1 overflow-y-auto p-4 space-y-3">
       {hasMore && (
         <div className="flex justify-center py-2">
           <button
@@ -33,7 +25,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
             disabled={loadingMore}
             className="text-sm text-indigo-300 hover:text-indigo-100 disabled:opacity-50 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full transition-colors"
           >
-            {loadingMore ? UI_STRINGS.loading : UI_STRINGS.loadEarlier}
+            {loadingMore ? t.loading : t.loadEarlier}
           </button>
         </div>
       )}
@@ -43,10 +35,9 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
           return (
             <div key={msg.id} className="flex justify-center">
               <span className="text-white/40 text-xs bg-white/5 px-3 py-1 rounded-full">
-                {msg.action === 'join' && UI_STRINGS.joinedRoom(msg.senderName)}
-                {msg.action === 'leave' && UI_STRINGS.leftRoom(msg.senderName)}
-                {msg.action === 'kick' &&
-                  UI_STRINGS.kickedFrom(msg.senderName, msg.kickerName)}
+                {msg.action === 'join' && t.joinedRoom(msg.senderName)}
+                {msg.action === 'leave' && t.leftRoom(msg.senderName)}
+                {msg.action === 'kick' && t.kickedFrom(msg.senderName, msg.kickerName)}
               </span>
             </div>
           );
@@ -54,14 +45,11 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
 
         const isOwn = msg.senderId === currentUserId;
         const translation = msg.translations?.[userLanguage];
-        const showTranslation =
-          translation && msg.originalLanguage !== userLanguage;
+        const needsTranslation = !isOwn && msg.originalLanguage !== userLanguage;
+        const showTranslation = needsTranslation && translation;
 
         return (
-          <div
-            key={msg.id}
-            className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
-          >
+          <div key={msg.id} className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-xs lg:max-w-md xl:max-w-lg rounded-2xl px-4 py-3 shadow-md ${
                 isOwn
@@ -72,9 +60,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
               {!isOwn && (
                 <div className="text-xs font-semibold text-indigo-200 mb-1">
                   {msg.senderName}
-                  <span className="ml-1 text-white/40 font-normal">
-                    · {msg.originalLanguage}
-                  </span>
+                  <span className="ml-1 text-white/40 font-normal">· {msg.originalLanguage}</span>
                 </div>
               )}
 
@@ -83,28 +69,24 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
                   <p className="text-sm leading-relaxed">{translation}</p>
                   <div className="mt-2 pt-2 border-t border-white/20">
                     <p className="text-xs text-white/60 mb-0.5">
-                      {UI_STRINGS.originalText} ({msg.originalLanguage})
+                      {t.originalText} ({msg.originalLanguage})
                     </p>
                     <p className="text-sm leading-relaxed text-white/80">{msg.text}</p>
                   </div>
                 </>
-              ) : !isOwn && msg.originalLanguage !== userLanguage && msg.translationFailed ? (
+              ) : needsTranslation && msg.translationFailed ? (
                 <p className="text-sm leading-relaxed text-red-300/70 italic">
-                  {UI_STRINGS.translationUnavailable}
+                  {t.translationUnavailable}
                 </p>
-              ) : !isOwn && msg.originalLanguage !== userLanguage && !translation ? (
+              ) : needsTranslation && !translation ? (
                 <p className="text-sm leading-relaxed text-white/50 italic">
-                  {UI_STRINGS.translating}
+                  {t.translating}
                 </p>
               ) : (
                 <p className="text-sm leading-relaxed">{msg.text}</p>
               )}
 
-              <div
-                className={`text-xs mt-1 ${
-                  isOwn ? 'text-white/50 text-right' : 'text-white/40'
-                }`}
-              >
+              <div className={`text-xs mt-1 ${isOwn ? 'text-white/50 text-right' : 'text-white/40'}`}>
                 {formatTime(msg.timestamp)}
               </div>
             </div>
