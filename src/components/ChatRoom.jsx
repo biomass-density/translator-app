@@ -86,8 +86,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     currentAudioRef.current = audio;
     isPlayingRef.current = true;
     audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
-    audio.play().catch(() => { URL.revokeObjectURL(url); playNext(); });
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      setTtsError('Audio decode error — invalid audio data');
+      playNext();
+    };
+    audio.play().catch(err => {
+      URL.revokeObjectURL(url);
+      setTtsError(`Playback blocked: ${err.name}`);
+      playNext();
+    });
   }
 
   function stopAllAudio() {
