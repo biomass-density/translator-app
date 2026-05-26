@@ -77,6 +77,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [showEndModal, setShowEndModal] = useState(false);
   const ttsSpeedRef = useRef(1);
   const roomDeletedRef = useRef(false);
+  const showEndModalRef = useRef(false);
+  const latestMessagesRef = useRef([]);
 
   const t = getT(userLanguage);
 
@@ -279,12 +281,25 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
     const unsubRoom = onSnapshot(roomRef, (s) => {
-      if (!s.exists()) { if (!roomDeletedRef.current) onLeave(); }
-      else setOwnerId(s.data().createdBy ?? null);
+      if (!s.exists()) {
+        if (roomDeletedRef.current) return; // we (host) deleted it — modal handled elsewhere
+        // Room deleted by host while we're a participant
+        if (!showEndModalRef.current) {
+          showEndModalRef.current = true;
+          stopAllAudio();
+          setShowEndModal(true);
+        }
+      } else setOwnerId(s.data().createdBy ?? null);
     }, (err) => console.error('Room watch error:', err));
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
-      if (!s.exists() && !roomDeletedRef.current) onLeave();
+      if (!s.exists() && !roomDeletedRef.current) {
+        // Brief delay so room watcher can fire first if room was also deleted.
+        // If the room watcher sets showEndModalRef, we skip onLeave (not a kick).
+        setTimeout(() => {
+          if (!showEndModalRef.current) onLeave(); // kicked — room still exists
+        }, 200);
+      }
     }, (err) => console.error('Participant watch error:', err));
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
@@ -294,10 +309,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     const q = query(msgsRef, orderBy('timestamp', 'desc'), limit(PAGE_SIZE));
     const unsub = onSnapshot(q, (snap) => {
-      const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setHasMore(fetched.length === PAGE_SIZE);
+      const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
+      setHasMore(snap.docs.length === PAGE_SIZE);
       setLastVisible(snap.docs[snap.docs.length - 1] ?? null);
-      setMessages(fetched.reverse());
+      setMessages(fetched);
+      if (fetched.length > 0) latestMessagesRef.current = fetched; // preserve across room deletion
     }, (err) => console.error('Messages watch error:', err));
     return unsub;
   }, [roomId]);
@@ -366,6 +382,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   async function handleDeleteConfirm() {
     roomDeletedRef.current = true;
+    showEndModalRef.current = true;
     await onDelete(); // Firestore cleanup — does not clear session
     stopAllAudio();
     setShowDeleteModal(false);
@@ -375,7 +392,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   function exportTranscript() {
     const lines = [];
 
-    for (const msg of messages) {
+    for (const msg of latestMessagesRef.current) {
       if (msg.isSystem) continue;
       const translation = msg.translations?.[userLanguage];
       const text = (translation && msg.originalLanguage !== userLanguage) ? translation : msg.text;
@@ -565,7 +582,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             <span className="text-5xl">🙏</span>
             <div>
               <h2 className={`font-bold text-xl mb-1 ${darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]'}`}>Thanks for joining!</h2>
-              <p className={`text-sm ${darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]'}`}>The session has ended.</p>
+              <p className={`text-sm ${darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]'}`}>
+                {isOwner ? 'The session has ended.' : 'The host has ended the session.'}
+              </p>
             </div>
             <button
               onClick={exportTranscript}
