@@ -123,6 +123,9 @@ export default function App() {
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
     await setDoc(participantRef, { name, language, joinedAt: Date.now(), isOnline: true });
 
+    // Clear any previous sessionEnded flag so watchers don't misfire
+    await setDoc(roomRef, { sessionEnded: false }, { merge: true });
+
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     await setDoc(doc(msgsRef), {
       isSystem: true, action: 'join', senderName: name,
@@ -183,28 +186,23 @@ export default function App() {
     }
   }
 
-  // Deletes all Firestore data but intentionally does NOT clear the session —
-  // ChatRoom shows the end-of-session modal first, then calls onLeave to exit.
-  async function handleDeleteRoomData() {
+  // Ends the session: marks the room as ended and kicks all participants,
+  // but does NOT delete messages or the room document.
+  // The room remains in My Rooms so the host can delete the data later.
+  async function handleEndSession() {
     if (!session || !userId) return;
     const { roomId } = session;
-    const batch = writeBatch(db);
 
-    const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
-    msgsSnap.forEach(d => batch.delete(d.ref));
+    // Signal to all participant watchers that the session has ended
+    await setDoc(doc(db, 'rooms', roomId), { sessionEnded: true }, { merge: true });
 
+    // Kick everyone
     const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
+    const batch = writeBatch(db);
     partsSnap.forEach(d => batch.delete(d.ref));
-
-    batch.delete(doc(db, 'rooms', roomId));
     await batch.commit();
 
-    setMyRooms(prev => {
-      const updated = { ...prev };
-      delete updated[roomId];
-      localStorage.setItem(MY_ROOMS_KEY, JSON.stringify(updated));
-      return updated;
-    });
+    // Clear the active session from localStorage (room stays in myRooms for later deletion)
     localStorage.removeItem(SESSION_KEY);
   }
 
@@ -279,7 +277,7 @@ export default function App() {
         isOwner={session.isOwner}
         darkMode={darkMode}
         onLeave={handleLeaveRoom}
-        onDelete={handleDeleteRoomData}
+        onEndSession={handleEndSession}
         onKick={handleKickParticipant}
       />
     );

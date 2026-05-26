@@ -7,7 +7,6 @@ import { db } from '../firebase.js';
 import { getT } from '../constants.js';
 import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
-import DeleteModal from './DeleteModal.jsx';
 
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
@@ -55,14 +54,13 @@ function HeadphonesIcon({ active }) {
   );
 }
 
-export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, darkMode, onLeave, onDelete, onKick }) {
+export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, darkMode, onLeave, onEndSession, onKick }) {
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [sendDisabled, setSendDisabled] = useState(false);
   const [sendError, setSendError] = useState('');
   const [showParticipants, setShowParticipants] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastVisible, setLastVisible] = useState(null);
@@ -76,7 +74,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [ownerId, setOwnerId] = useState(null);
   const [showEndModal, setShowEndModal] = useState(false);
   const ttsSpeedRef = useRef(1);
-  const roomDeletedRef = useRef(false);
   const showEndModalRef = useRef(false);
   const latestMessagesRef = useRef([]);
 
@@ -277,30 +274,43 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const participantsRef = useRef(participants);
   useEffect(() => { participantsRef.current = participants; }, [participants]);
 
-  // Watch for room deletion or being kicked; also read ownerId
+  // Watch for room changes and being kicked; also read ownerId
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
+    let isInitialSnapshot = true;
     const unsubRoom = onSnapshot(roomRef, (s) => {
+      const initial = isInitialSnapshot;
+      isInitialSnapshot = false;
+
       if (!s.exists()) {
-        if (roomDeletedRef.current) return; // we (host) deleted it — modal handled elsewhere
-        // Room deleted by host while we're a participant
-        if (!showEndModalRef.current) {
-          showEndModalRef.current = true;
-          stopAllAudio();
-          setShowEndModal(true);
-        }
-      } else setOwnerId(s.data().createdBy ?? null);
+        // Room hard-deleted (shouldn't happen in new flow, but handle gracefully)
+        if (!showEndModalRef.current) onLeave();
+        return;
+      }
+
+      const data = s.data();
+      setOwnerId(data.createdBy ?? null);
+
+      // Session ended by host — show modal for participants (skip on initial load
+      // so joining an already-ended room doesn't immediately trigger the modal)
+      if (!initial && data.sessionEnded && !showEndModalRef.current) {
+        showEndModalRef.current = true;
+        stopAllAudio();
+        setShowEndModal(true);
+      }
     }, (err) => console.error('Room watch error:', err));
+
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
-      if (!s.exists() && !roomDeletedRef.current) {
-        // Brief delay so room watcher can fire first if room was also deleted.
-        // If the room watcher sets showEndModalRef, we skip onLeave (not a kick).
+      if (!s.exists()) {
+        // Delay so the room watcher can fire first if sessionEnded was set.
+        // If showEndModalRef is set by then, this is a session-end (not a kick).
         setTimeout(() => {
-          if (!showEndModalRef.current) onLeave(); // kicked — room still exists
-        }, 200);
+          if (!showEndModalRef.current) onLeave(); // actually kicked
+        }, 500);
       }
     }, (err) => console.error('Participant watch error:', err));
+
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
 
@@ -380,12 +390,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
-  async function handleDeleteConfirm() {
-    roomDeletedRef.current = true;
+  async function handleEndSessionClick() {
     showEndModalRef.current = true;
-    await onDelete(); // Firestore cleanup — does not clear session
     stopAllAudio();
-    setShowDeleteModal(false);
+    await onEndSession(); // marks sessionEnded, kicks participants, clears localStorage session
     setShowEndModal(true);
   }
 
@@ -477,13 +485,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
           {isOwner && (
             <button
-              onClick={() => setShowDeleteModal(true)}
-              className={`p-1.5 rounded-full transition-colors hover:text-red-500 ${iconBtn}`}
-              title={t.deleteRoom}
+              onClick={handleEndSessionClick}
+              className={`text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
+              End Session
             </button>
           )}
 
@@ -562,15 +567,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           currentUserId={userId}
           onKick={onKick}
           onClose={() => setShowParticipants(false)}
-          t={t}
-          darkMode={darkMode}
-        />
-      )}
-
-      {showDeleteModal && (
-        <DeleteModal
-          onConfirm={handleDeleteConfirm}
-          onCancel={() => setShowDeleteModal(false)}
           t={t}
           darkMode={darkMode}
         />

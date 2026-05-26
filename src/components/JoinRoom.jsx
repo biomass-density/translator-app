@@ -207,7 +207,7 @@ export default function JoinRoom({
         {myRoomsList.length > 0 && (
           <div className={`mt-6 pt-6 border-t ${borderColor}`}>
             <div className="flex items-center justify-between mb-3">
-              <span className={`text-xs font-semibold uppercase tracking-wide ${textSecondary}`}>{t.myRooms}</span>
+              <span className={`text-xs font-semibold uppercase tracking-wide ${textSecondary}`}>Open Rooms</span>
               <button
                 type="button"
                 onClick={() => setConfirmDeleteAll(true)}
