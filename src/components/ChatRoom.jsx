@@ -12,13 +12,8 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
-const LANG_CODES = {
-  English: 'en-US',
-  German: 'de-DE',
-  Russian: 'ru-RU',
-  Polish: 'pl-PL',
-  Ukrainian: 'uk-UA',
-};
+// Minimal silent WAV — played on toggle click to unlock iOS audio
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
@@ -29,6 +24,24 @@ async function translateText(text, targetLanguages) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Translation request failed');
   return data;
+}
+
+async function fetchTTSAudio(text, language) {
+  const res = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, language }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'TTS request failed');
+  if (!data.audioContent) throw new Error('No audio returned');
+
+  // base64 MP3 → Blob URL
+  const binary = atob(data.audioContent);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'audio/mpeg' });
+  return URL.createObjectURL(blob);
 }
 
 function HeadphonesIcon({ active }) {
@@ -55,56 +68,69 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   const t = getT(userLanguage);
 
-  // Speech synthesis queue
-  const speechQueueRef = useRef([]);
-  const isSpeakingRef = useRef(false);
+  // Audio queue
+  const audioQueueRef = useRef([]);    // pending blob URLs
+  const currentAudioRef = useRef(null); // currently playing Audio element
+  const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
 
-  function speakNext() {
-    if (speechQueueRef.current.length === 0) {
-      isSpeakingRef.current = false;
+  function playNext() {
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      currentAudioRef.current = null;
       return;
     }
-    const text = speechQueueRef.current.shift();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = LANG_CODES[userLanguage] || 'en-US';
-    utterance.rate = 1.0;
-    utterance.onend = speakNext;
-    utterance.onerror = speakNext;
-    isSpeakingRef.current = true;
-    window.speechSynthesis.speak(utterance);
+    const url = audioQueueRef.current.shift();
+    const audio = new Audio(url);
+    currentAudioRef.current = audio;
+    isPlayingRef.current = true;
+    audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); playNext(); };
+    audio.play().catch(() => { URL.revokeObjectURL(url); playNext(); });
   }
 
-  function enqueue(text) {
-    speechQueueRef.current.push(text);
-    if (!isSpeakingRef.current) speakNext();
+  function stopAllAudio() {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    // Revoke any queued blob URLs to free memory
+    audioQueueRef.current.forEach(url => URL.revokeObjectURL(url));
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
   }
 
-  // Toggle listening mode
+  async function fetchAndEnqueue(text) {
+    try {
+      const url = await fetchTTSAudio(text, userLanguage);
+      audioQueueRef.current.push(url);
+      if (!isPlayingRef.current) playNext();
+    } catch (err) {
+      console.error('TTS error:', err.message);
+    }
+  }
+
   function toggleListening() {
     if (!listeningMode) {
-      // Prime audio context on user gesture (required for iOS)
-      if (window.speechSynthesis) {
-        const primer = new SpeechSynthesisUtterance('');
-        window.speechSynthesis.speak(primer);
-        window.speechSynthesis.cancel();
-      }
-      // Mark all current messages as already spoken so we only speak new ones
+      // Play silent audio on the button click (user gesture) to unlock iOS audio
+      const unlock = new Audio(SILENT_WAV);
+      unlock.play().catch(() => {});
+      // Mark all currently visible messages as already spoken
       spokenIdsRef.current = new Set(messages.map(m => m.id));
     } else {
-      window.speechSynthesis?.cancel();
-      speechQueueRef.current = [];
-      isSpeakingRef.current = false;
+      stopAllAudio();
     }
     setListeningMode(prev => !prev);
   }
 
-  // Watch messages for new speakable content
+  // Watch messages — speak new ones when listening mode is on
   useEffect(() => {
-    if (!listeningMode || !window.speechSynthesis) return;
+    if (!listeningMode) return;
 
     for (const msg of messages) {
       if (spokenIdsRef.current.has(msg.id)) continue;
+
+      // Skip system messages and own messages silently
       if (msg.isSystem || msg.senderId === userId) {
         spokenIdsRef.current.add(msg.id);
         continue;
@@ -113,21 +139,17 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const needsTranslation = msg.originalLanguage !== userLanguage;
       const translation = msg.translations?.[userLanguage];
 
-      // Wait until translation is ready (re-fires when message updates with translation)
+      // Wait until translation is ready (effect re-fires when message doc updates)
       if (needsTranslation && !translation && !msg.translationFailed) continue;
 
       const text = needsTranslation && translation ? translation : msg.text;
       spokenIdsRef.current.add(msg.id);
-      enqueue(text);
+      fetchAndEnqueue(text);
     }
   }, [messages, listeningMode]);
 
-  // Cancel speech when unmounting
-  useEffect(() => {
-    return () => {
-      window.speechSynthesis?.cancel();
-    };
-  }, []);
+  // Clean up audio on unmount
+  useEffect(() => () => stopAllAudio(), []);
 
   // Stale closure fix for participants
   const participantsRef = useRef(participants);
@@ -259,11 +281,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           <p className={`text-xs ${subText}`}>{userLanguage}</p>
         </div>
         <div className="flex items-center gap-2">
+
           {/* Listening mode toggle */}
           <button
             onClick={toggleListening}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${listeningBtn}`}
-            title={listeningMode ? 'Stop listening' : 'Start listening mode'}
+            title={listeningMode ? 'Stop listening' : 'Listen to messages aloud'}
           >
             <HeadphonesIcon active={listeningMode} />
             {listeningMode && <span className="text-xs font-medium">Live</span>}
@@ -292,6 +315,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               </svg>
             </button>
           )}
+
           <button onClick={onLeave} className="text-red-500 hover:text-red-600 text-sm font-medium transition-colors">
             {t.leaveRoom}
           </button>
