@@ -363,34 +363,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   };
 
   function exportTranscript() {
-    const dateStr = new Date().toLocaleString();
-    const lines = [
-      `BabelChat — Room #${roomId}`,
-      `Exported: ${dateStr}`,
-      `Your language: ${userLanguage}`,
-      '',
-    ];
+    const lines = [];
 
     for (const msg of messages) {
-      const time = msg.timestamp
-        ? new Date(msg.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
-        : '';
-      if (msg.isSystem) {
-        if (msg.action === 'join') lines.push(`[${time}] — ${msg.senderName} joined`);
-        else if (msg.action === 'leave') lines.push(`[${time}] — ${msg.senderName} left`);
-        else if (msg.action === 'kick') lines.push(`[${time}] — ${msg.senderName} was removed by ${msg.kickerName}`);
-      } else {
-        const isOwn = msg.senderId === userId;
-        const label = isOwn ? `${msg.senderName} (you)` : msg.senderName;
-        lines.push(`[${time}] ${label}: ${msg.text}`);
-        const translation = msg.translations?.[userLanguage];
-        if (translation && msg.originalLanguage !== userLanguage) {
-          lines.push(`  → ${translation}`);
-        }
-      }
+      if (msg.isSystem) continue;
+      const translation = msg.translations?.[userLanguage];
+      const text = (translation && msg.originalLanguage !== userLanguage) ? translation : msg.text;
+      lines.push(text);
     }
 
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([lines.join('\n\n')], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
