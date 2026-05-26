@@ -93,7 +93,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     };
     audio.play().catch(err => {
       URL.revokeObjectURL(url);
-      setTtsError(`Playback blocked: ${err.name}`);
+      setTtsError(`${err.name}: ${err.message}`);
       playNext();
     });
   }
@@ -298,12 +298,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           {/* Listening mode toggle */}
           <button
             onClick={toggleListening}
-            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${listeningBtn}`}
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${ttsError ? 'bg-red-500/10 text-red-500' : listeningBtn}`}
             title={listeningMode ? 'Stop listening' : 'Listen to messages aloud'}
           >
             <HeadphonesIcon active={listeningMode} />
             {listeningMode && !ttsError && <span className="text-xs font-medium">Live</span>}
-            {ttsError && <span className="text-xs font-medium text-red-500" title={ttsError}>Error</span>}
+            {ttsError && <span className="text-xs font-medium">Error</span>}
           </button>
 
           <button
@@ -335,6 +335,14 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           </button>
         </div>
       </div>
+
+      {/* TTS error banner */}
+      {ttsError && (
+        <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+          <p className="text-xs text-red-500 flex-1">{ttsError}</p>
+          <button onClick={() => setTtsError('')} className="text-red-400 hover:text-red-500 text-xs flex-shrink-0">✕</button>
+        </div>
+      )}
 
       <MessageList
         messages={messages}

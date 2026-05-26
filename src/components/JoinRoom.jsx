@@ -140,7 +140,7 @@ export default function JoinRoom({
                 className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none appearance-none ${inputBg}`}
               >
                 {LANGUAGES.map(lang => (
-                  <option key={lang.code} value={lang.name}>{lang.name}</option>
+                  <option key={lang.code} value={lang.name}>{lang.flag} {lang.nativeName}</option>
                 ))}
               </select>
               <div className={`pointer-events-none absolute inset-y-0 right-4 flex items-center ${chevronColor}`}>

@@ -1,11 +1,11 @@
 export const APP_ID = 'babelchat';
 
 export const LANGUAGES = [
-  { code: 'en', name: 'English' },
-  { code: 'de', name: 'German' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'pl', name: 'Polish' },
-  { code: 'uk', name: 'Ukrainian' },
+  { code: 'en', name: 'English',   nativeName: 'English',    flag: '🇬🇧' },
+  { code: 'de', name: 'German',    nativeName: 'Deutsch',    flag: '🇩🇪' },
+  { code: 'ru', name: 'Russian',   nativeName: 'Русский',    flag: '🇷🇺' },
+  { code: 'pl', name: 'Polish',    nativeName: 'Polski',     flag: '🇵🇱' },
+  { code: 'uk', name: 'Ukrainian', nativeName: 'Українська', flag: '🇺🇦' },
 ];
 
 export const UI_STRINGS = {
