@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  collection, doc, setDoc, onSnapshot,
+  collection, doc, setDoc, onSnapshot, writeBatch,
   query, orderBy, limit, startAfter, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
@@ -221,7 +221,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   }, [messages, listeningMode]);
 
-  // Session history — retroactively translate messages missing our language
+  // Session history — retroactively translate messages missing our language.
+  // Translations are collected in groups of 5 and written in a single batch,
+  // so we get ceil(N/5) Firestore updates instead of N — far fewer re-renders.
   const translatingIdsRef = useRef(new Set());
   useEffect(() => {
     const missing = messages.filter(msg =>
@@ -236,26 +238,47 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
     missing.forEach(msg => translatingIdsRef.current.add(msg.id));
 
-    // Stagger calls 400ms apart to avoid rate limiting.
-    // Re-check inside the timeout: the sender's real-time translation may have
-    // arrived while we were waiting, in which case we must not overwrite it.
-    missing.forEach((msg, i) => {
-      setTimeout(async () => {
+    const BATCH_SIZE = 5;
+
+    (async () => {
+      let pending = []; // { msgId, translations }
+
+      const flushBatch = async () => {
+        if (pending.length === 0) return;
+        const toWrite = pending.splice(0); // drain
+        const batch = writeBatch(db);
+        toWrite.forEach(({ msgId, translations }) =>
+          batch.set(doc(db, 'rooms', roomId, 'messages', msgId), { translations }, { merge: true })
+        );
+        await batch.commit().catch(err =>
+          console.error('Batch translation write error:', err.message)
+        );
+      };
+
+      for (let i = 0; i < missing.length; i++) {
+        const msg = missing[i];
+        if (i > 0) await new Promise(r => setTimeout(r, 400));
+
+        // Skip if real-time translation arrived while we were waiting
         const already = latestMessagesRef.current.find(m => m.id === msg.id);
         if (already?.translations?.[userLanguage]) {
-          translatingIdsRef.current.delete(msg.id); // real-time translation won, skip
-          return;
+          translatingIdsRef.current.delete(msg.id);
+          continue;
         }
+
         try {
           const result = await translateText(msg.text, [userLanguage]);
-          const msgRef = doc(db, 'rooms', roomId, 'messages', msg.id);
-          await setDoc(msgRef, { translations: result.translations ?? {} }, { merge: true });
+          pending.push({ msgId: msg.id, translations: result.translations ?? {} });
         } catch (err) {
           console.error('Retroactive translation error:', err.message);
-          translatingIdsRef.current.delete(msg.id); // allow retry
+          translatingIdsRef.current.delete(msg.id);
         }
-      }, i * 400);
-    });
+
+        if (pending.length >= BATCH_SIZE) await flushBatch();
+      }
+
+      await flushBatch(); // write any remainder
+    })();
   }, [messages, userLanguage, userId, roomId]);
 
   // Retry a failed translation manually
