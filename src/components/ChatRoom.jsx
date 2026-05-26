@@ -65,6 +65,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastVisible, setLastVisible] = useState(null);
   const [listeningMode, setListeningMode] = useState(false);
+  const [ttsError, setTtsError] = useState('');
 
   const t = getT(userLanguage);
 
@@ -103,10 +104,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   async function fetchAndEnqueue(text) {
     try {
       const url = await fetchTTSAudio(text, userLanguage);
+      setTtsError('');
       audioQueueRef.current.push(url);
       if (!isPlayingRef.current) playNext();
     } catch (err) {
       console.error('TTS error:', err.message);
+      setTtsError(err.message);
     }
   }
 
@@ -115,10 +118,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       // Play silent audio on the button click (user gesture) to unlock iOS audio
       const unlock = new Audio(SILENT_WAV);
       unlock.play().catch(() => {});
+      setTtsError('');
       // Mark all currently visible messages as already spoken
       spokenIdsRef.current = new Set(messages.map(m => m.id));
     } else {
       stopAllAudio();
+      setTtsError('');
     }
     setListeningMode(prev => !prev);
   }
@@ -289,7 +294,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             title={listeningMode ? 'Stop listening' : 'Listen to messages aloud'}
           >
             <HeadphonesIcon active={listeningMode} />
-            {listeningMode && <span className="text-xs font-medium">Live</span>}
+            {listeningMode && !ttsError && <span className="text-xs font-medium">Live</span>}
+            {ttsError && <span className="text-xs font-medium text-red-500" title={ttsError}>Error</span>}
           </button>
 
           <button

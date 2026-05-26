@@ -28,7 +28,7 @@ export async function onRequestPost(context) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text }] }],
+          contents: [{ parts: [{ text: `Read aloud in ${language}: ${text}` }] }],
           generationConfig: {
             responseModalities: ['AUDIO'],
             speechConfig: {
