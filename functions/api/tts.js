@@ -1,5 +1,4 @@
-// Gemini 2.0 Flash audio output — uses the same GEMINI_API_KEY as translation
-// Returns PCM audio wrapped in a WAV header so browsers can play it directly
+// Gemini 2.5 Flash TTS — uses GEMINI_API_KEY, returns audio playable by browsers
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -52,16 +51,26 @@ export async function onRequestPost(context) {
 
     const part = data.candidates?.[0]?.content?.parts?.[0];
     if (!part?.inlineData?.data) {
-      return Response.json({ error: 'No audio returned by Gemini' }, { status: 500 });
+      // Return debug info so we can see what actually came back
+      return Response.json({
+        error: `No audio in response. Structure: ${JSON.stringify(Object.keys(data))}`,
+      }, { status: 500 });
     }
 
-    // Gemini returns raw PCM (16-bit, 24 kHz, mono) — wrap it in a WAV header
     const mimeType = part.inlineData.mimeType || 'audio/pcm;rate=24000';
-    const sampleRate = parseInt(mimeType.match(/rate=(\d+)/)?.[1] ?? '24000', 10);
-    const pcmBytes = base64ToUint8Array(part.inlineData.data);
-    const wavBytes = pcmToWav(pcmBytes, sampleRate);
+    const audioData = part.inlineData.data; // base64
 
-    return Response.json({ audioContent: uint8ArrayToBase64(wavBytes) });
+    // PCM needs a WAV header to be playable; MP3/OGG/WAV can be returned as-is
+    if (mimeType.toLowerCase().includes('pcm') || mimeType.toLowerCase().includes('l16')) {
+      const sampleRate = parseInt(mimeType.match(/rate=(\d+)/i)?.[1] ?? '24000', 10);
+      const pcmBytes = base64ToUint8Array(audioData);
+      const wavBytes = pcmToWav(pcmBytes, sampleRate);
+      return Response.json({ audioContent: uint8ArrayToBase64(wavBytes), mimeType: 'audio/wav' });
+    }
+
+    // Already a playable format (mp3, ogg, wav, etc.)
+    return Response.json({ audioContent: audioData, mimeType });
+
   } catch (err) {
     return Response.json({ error: `TTS request failed: ${err.message}` }, { status: 500 });
   }
@@ -73,7 +82,6 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   const dataLen = pcm.length;
   const buf = new ArrayBuffer(44 + dataLen);
   const v = new DataView(buf);
-
   const write = (off, str) => { for (let i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i)); };
 
   write(0, 'RIFF');
@@ -81,15 +89,14 @@ function pcmToWav(pcm, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
   write(8, 'WAVE');
   write(12, 'fmt ');
   v.setUint32(16, 16, true);
-  v.setUint16(20, 1, true);                                         // PCM
+  v.setUint16(20, 1, true);
   v.setUint16(22, channels, true);
   v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * channels * bitsPerSample / 8, true); // byte rate
-  v.setUint16(32, channels * bitsPerSample / 8, true);              // block align
+  v.setUint32(28, sampleRate * channels * bitsPerSample / 8, true);
+  v.setUint16(32, channels * bitsPerSample / 8, true);
   v.setUint16(34, bitsPerSample, true);
   write(36, 'data');
   v.setUint32(40, dataLen, true);
-
   new Uint8Array(buf).set(pcm, 44);
   return new Uint8Array(buf);
 }
