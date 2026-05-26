@@ -26,11 +26,11 @@ async function translateText(text, targetLanguages) {
 const TTS_SPEEDS = [0.75, 1, 1.25, 1.5];
 const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.25: '1.25×', 1.5: '1.5×' };
 
-async function fetchTTSAudio(text, language) {
+async function fetchTTSAudio(text, language, speed = 1) {
   const res = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, language }),
+    body: JSON.stringify({ text, language, speed }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
@@ -107,9 +107,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
   const audioCtxRef = useRef(null);
   const currentSourceRef = useRef(null);
-  const audioQueueRef = useRef([]);   // queue of { base64, msgId }
+  const audioQueueRef = useRef([]);   // queue of { base64, msgId, text }
   const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
+  const currentItemRef = useRef(null); // { text, msgId } of currently-playing item
 
   async function playNext() {
     if (audioQueueRef.current.length === 0) {
@@ -121,7 +122,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     const ctx = audioCtxRef.current;
     if (!ctx) { isPlayingRef.current = false; return; }
 
-    const { base64, msgId } = audioQueueRef.current.shift();
+    const { base64, msgId, text } = audioQueueRef.current.shift();
+    currentItemRef.current = { text, msgId };
     setQueueLength(audioQueueRef.current.length);
     isPlayingRef.current = true;
     setSpeakingMsgId(msgId);
@@ -132,9 +134,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
-      source.playbackRate.value = ttsSpeedRef.current;
       currentSourceRef.current = source;
-      source.onended = () => { currentSourceRef.current = null; playNext(); };
+      source.onended = () => { currentSourceRef.current = null; currentItemRef.current = null; playNext(); };
       source.start(0);
     } catch (err) {
       setTtsError(`Audio error: ${err.message}`);
@@ -146,6 +147,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   function stopAllAudio() {
     try { currentSourceRef.current?.stop(); } catch (_) {}
     currentSourceRef.current = null;
+    currentItemRef.current = null;
     audioQueueRef.current = [];
     isPlayingRef.current = false;
     setSpeakingMsgId(null);
@@ -154,9 +156,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   async function fetchAndEnqueue(text, msgId) {
     try {
-      const base64 = await fetchTTSAudio(text, userLanguage);
+      const base64 = await fetchTTSAudio(text, userLanguage, ttsSpeedRef.current);
       setTtsError('');
-      audioQueueRef.current.push({ base64, msgId });
+      audioQueueRef.current.push({ base64, msgId, text });
       setQueueLength(audioQueueRef.current.length + (isPlayingRef.current ? 1 : 0));
       if (!isPlayingRef.current) playNext();
     } catch (err) {
@@ -187,9 +189,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const idx = TTS_SPEEDS.indexOf(prev);
       const next = TTS_SPEEDS[(idx + 1) % TTS_SPEEDS.length];
       ttsSpeedRef.current = next;
-      // Apply immediately to the currently playing source
-      if (currentSourceRef.current) {
-        currentSourceRef.current.playbackRate.value = next;
+      // Stop current audio and re-fetch at new speed — avoids chipmunk pitch shift
+      if (isPlayingRef.current && currentItemRef.current) {
+        const { text, msgId } = currentItemRef.current;
+        stopAllAudio();
+        fetchAndEnqueue(text, msgId);
       }
       return next;
     });
