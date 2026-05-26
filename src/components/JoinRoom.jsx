@@ -168,7 +168,7 @@ export default function JoinRoom({
             <input
               type="text"
               value={roomId}
-              onChange={e => setRoomId(e.target.value)}
+              onChange={e => setRoomId(e.target.value.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase())}
               placeholder={t.roomIdPlaceholder}
               className={`w-full border rounded-2xl px-4 py-3 text-base focus:outline-none ${inputBg}`}
               required

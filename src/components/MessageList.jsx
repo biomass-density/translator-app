@@ -5,17 +5,32 @@ function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function MessageList({ messages, currentUserId, userLanguage, hasMore, onLoadMore, loadingMore, t, darkMode }) {
+export default function MessageList({ messages, currentUserId, userLanguage, hasMore, onLoadMore, loadingMore, speakingMsgId, t, darkMode }) {
   const bottomRef = useRef(null);
+  const containerRef = useRef(null);
   const prevLengthRef = useRef(messages.length);
   const [expandedIds, setExpandedIds] = useState(new Set());
 
+  // Auto-scroll only if user is near the bottom (within 150px)
   useEffect(() => {
-    if (messages.length > prevLengthRef.current && messages.length - prevLengthRef.current <= 5) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    const container = containerRef.current;
+    if (!container) return;
+
+    const newMessages = messages.length > prevLengthRef.current;
     prevLengthRef.current = messages.length;
+
+    if (newMessages) {
+      const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (distFromBottom < 150) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
   }, [messages.length]);
+
+  // Always scroll to bottom on initial load
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'instant' });
+  }, []);
 
   const toggleOriginal = (id) => {
     setExpandedIds(prev => {
@@ -28,6 +43,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
   const bg = darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]';
   const ownBubble = darkMode ? 'bg-[#F0F0F0] text-[#0A0A0A]' : 'bg-[#0A0A0A] text-[#FFFFFF]';
   const otherBubble = darkMode ? 'bg-[#272727] text-[#F5F5F5]' : 'bg-[#EFEFEF] text-[#0A0A0A]';
+  const speakingBubble = darkMode ? 'bg-[#3A3A3A] text-[#F5F5F5] ring-1 ring-[#888888]' : 'bg-[#DEDEDE] text-[#0A0A0A] ring-1 ring-[#888888]';
   const senderLabel = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
   const timestampColor = darkMode ? 'text-[#555555]' : 'text-[#9B9B9B]';
   const dividerColor = darkMode ? 'border-[#333333]' : 'border-[#DDDDDD]';
@@ -36,9 +52,12 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
   const systemText = darkMode ? 'text-[#555555]' : 'text-[#AAAAAA]';
   const loadMoreBg = darkMode ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#EFEFEF] text-[#6B6B6B] hover:text-[#0A0A0A]';
   const ownTranslatingColor = darkMode ? 'text-[#0A0A0A]/50' : 'text-[#FFFFFF]/60';
+  const emptyText = darkMode ? 'text-[#444444]' : 'text-[#CCCCCC]';
+
+  const nonSystemMessages = messages.filter(m => !m.isSystem);
 
   return (
-    <div className={`flex-1 min-h-0 overflow-y-auto ${bg} px-4 py-3 space-y-1`}>
+    <div ref={containerRef} className={`flex-1 min-h-0 overflow-y-auto ${bg} px-4 py-3 space-y-1`}>
       {hasMore && (
         <div className="flex justify-center py-2 mb-2">
           <button
@@ -48,6 +67,15 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
           >
             {loadingMore ? t.loading : t.loadEarlier}
           </button>
+        </div>
+      )}
+
+      {nonSystemMessages.length === 0 && !hasMore && (
+        <div className="flex flex-col items-center justify-center h-full min-h-[200px] gap-2">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={emptyText}>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          <p className={`text-sm ${emptyText}`}>No messages yet</p>
         </div>
       )}
 
@@ -65,6 +93,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
         }
 
         const isOwn = msg.senderId === currentUserId;
+        const isSpeaking = speakingMsgId === msg.id;
         const translation = msg.translations?.[userLanguage];
         const needsTranslation = !isOwn && msg.originalLanguage !== userLanguage;
         const showTranslation = needsTranslation && translation;
@@ -72,6 +101,12 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
 
         const prevMsg = messages[i - 1];
         const isGrouped = prevMsg && !prevMsg.isSystem && prevMsg.senderId === msg.senderId;
+
+        const bubbleClass = isOwn
+          ? `${ownBubble} rounded-[18px] rounded-br-[4px]`
+          : isSpeaking
+            ? `${speakingBubble} rounded-[18px] rounded-bl-[4px]`
+            : `${otherBubble} rounded-[18px] rounded-bl-[4px]`;
 
         return (
           <div
@@ -84,13 +119,16 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
               </span>
             )}
 
-            <div
-              className={`max-w-[75%] px-4 py-2.5 text-sm leading-relaxed
-                ${isOwn
-                  ? `${ownBubble} rounded-[18px] rounded-br-[4px]`
-                  : `${otherBubble} rounded-[18px] rounded-bl-[4px]`
-                }`}
-            >
+            <div className={`max-w-[75%] px-4 py-2.5 text-sm leading-relaxed transition-all ${bubbleClass}`}>
+              {isSpeaking && (
+                <div className="flex items-center gap-1 mb-1.5">
+                  <span className="flex gap-0.5 items-end" style={{ height: '12px' }}>
+                    <span className="soundbar-bar" style={{ height: '6px', animationDelay: '0ms' }} />
+                    <span className="soundbar-bar" style={{ height: '10px', animationDelay: '150ms' }} />
+                    <span className="soundbar-bar" style={{ height: '6px', animationDelay: '300ms' }} />
+                  </span>
+                </div>
+              )}
               {showTranslation ? (
                 <>
                   <p>{translation}</p>

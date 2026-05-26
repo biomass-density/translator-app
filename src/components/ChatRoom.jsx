@@ -12,7 +12,6 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
-// Minimal silent WAV — no longer needed, removed
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
     method: 'POST',
@@ -65,26 +64,46 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [lastVisible, setLastVisible] = useState(null);
   const [listeningMode, setListeningMode] = useState(false);
   const [ttsError, setTtsError] = useState('');
+  const [speakingMsgId, setSpeakingMsgId] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const t = getT(userLanguage);
+
+  // Screen wake lock — keeps display on while in a room
+  useEffect(() => {
+    let wakeLock = null;
+    const request = async () => {
+      if (!('wakeLock' in navigator)) return;
+      try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+    };
+    const handleVisibility = () => { if (document.visibilityState === 'visible') request(); };
+    request();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      wakeLock?.release();
+    };
+  }, []);
 
   // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
   const audioCtxRef = useRef(null);
   const currentSourceRef = useRef(null);
-  const audioQueueRef = useRef([]);   // queue of base64 MP3 strings
+  const audioQueueRef = useRef([]);   // queue of { base64, msgId }
   const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
 
   async function playNext() {
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
+      setSpeakingMsgId(null);
       return;
     }
     const ctx = audioCtxRef.current;
     if (!ctx) { isPlayingRef.current = false; return; }
 
-    const base64 = audioQueueRef.current.shift();
+    const { base64, msgId } = audioQueueRef.current.shift();
     isPlayingRef.current = true;
+    setSpeakingMsgId(msgId);
 
     try {
       const arrayBuffer = base64ToArrayBuffer(base64);
@@ -97,6 +116,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       source.start(0);
     } catch (err) {
       setTtsError(`Audio error: ${err.message}`);
+      setSpeakingMsgId(null);
       playNext();
     }
   }
@@ -106,13 +126,14 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     currentSourceRef.current = null;
     audioQueueRef.current = [];
     isPlayingRef.current = false;
+    setSpeakingMsgId(null);
   }
 
-  async function fetchAndEnqueue(text) {
+  async function fetchAndEnqueue(text, msgId) {
     try {
       const base64 = await fetchTTSAudio(text, userLanguage);
       setTtsError('');
-      audioQueueRef.current.push(base64);
+      audioQueueRef.current.push({ base64, msgId });
       if (!isPlayingRef.current) playNext();
     } catch (err) {
       console.error('TTS error:', err.message);
@@ -122,7 +143,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   function toggleListening() {
     if (!listeningMode) {
-      // Create AudioContext on user gesture — iOS unlocks it for all future async calls
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
         const ctx = new AudioCtx();
@@ -138,32 +158,33 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     setListeningMode(prev => !prev);
   }
 
+  function copyRoomLink() {
+    const url = `${window.location.origin}/${roomId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }
+
   // Watch messages — speak new ones when listening mode is on
   useEffect(() => {
     if (!listeningMode) return;
-
     for (const msg of messages) {
       if (spokenIdsRef.current.has(msg.id)) continue;
-
-      // Skip system messages and own messages silently
       if (msg.isSystem || msg.senderId === userId) {
         spokenIdsRef.current.add(msg.id);
         continue;
       }
-
       const needsTranslation = msg.originalLanguage !== userLanguage;
       const translation = msg.translations?.[userLanguage];
-
-      // Wait until translation is ready (effect re-fires when message doc updates)
       if (needsTranslation && !translation && !msg.translationFailed) continue;
-
       const text = needsTranslation && translation ? translation : msg.text;
       spokenIdsRef.current.add(msg.id);
-      fetchAndEnqueue(text);
+      fetchAndEnqueue(text, msg.id);
     }
   }, [messages, listeningMode]);
 
-  // Clean up audio on unmount
+  // Clean up audio and wake lock on unmount
   useEffect(() => () => {
     stopAllAudio();
     audioCtxRef.current?.close();
@@ -179,12 +200,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     const unsubRoom = onSnapshot(roomRef, (s) => {
       if (!s.exists()) onLeave();
     }, (err) => console.error('Room watch error:', err));
-
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
       if (!s.exists()) onLeave();
     }, (err) => console.error('Participant watch error:', err));
-
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
 
@@ -234,36 +253,24 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     e.preventDefault();
     const text = newMessage.trim();
     if (!text || sendDisabled) return;
-
     setNewMessage('');
     setSendError('');
     setSendDisabled(true);
     setTimeout(() => setSendDisabled(false), SEND_COOLDOWN_MS);
-
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     const newMsgRef = doc(msgsRef);
-
     try {
       await setDoc(newMsgRef, {
-        text,
-        senderId: userId,
-        senderName: userName,
-        originalLanguage: userLanguage,
-        timestamp: Date.now(),
-        translations: {},
+        text, senderId: userId, senderName: userName,
+        originalLanguage: userLanguage, timestamp: Date.now(), translations: {},
       });
-
       const targetLanguages = [...new Set(
-        participantsRef.current
-          .map((p) => p.language)
-          .filter((lang) => lang !== userLanguage)
+        participantsRef.current.map((p) => p.language).filter((lang) => lang !== userLanguage)
       )];
-
       if (targetLanguages.length > 0) {
         try {
           const result = await translateText(text, targetLanguages);
-          const translations = result.translations ?? {};
-          await setDoc(newMsgRef, { translations }, { merge: true });
+          await setDoc(newMsgRef, { translations: result.translations ?? {} }, { merge: true });
         } catch (translateErr) {
           console.error('Translation failed —', translateErr.message);
           await setDoc(newMsgRef, { translationFailed: true }, { merge: true }).catch(() => {});
@@ -280,12 +287,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const subText = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
   const iconBtn = darkMode ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
   const inputBarBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
-  const inputField = darkMode
-    ? 'bg-[#1A1A1A] text-[#F5F5F5] placeholder-[#555555]'
-    : 'bg-[#F2F2F2] text-[#0A0A0A] placeholder-[#AAAAAA]';
-  const sendBtn = darkMode
-    ? 'bg-[#F5F5F5] hover:bg-[#DDDDDD] active:bg-[#CCCCCC] text-[#0A0A0A]'
-    : 'bg-[#0A0A0A] hover:bg-[#333333] active:bg-[#555555] text-[#FFFFFF]';
+  const inputField = darkMode ? 'bg-[#1A1A1A] text-[#F5F5F5] placeholder-[#555555]' : 'bg-[#F2F2F2] text-[#0A0A0A] placeholder-[#AAAAAA]';
+  const sendBtn = darkMode ? 'bg-[#F5F5F5] hover:bg-[#DDDDDD] active:bg-[#CCCCCC] text-[#0A0A0A]' : 'bg-[#0A0A0A] hover:bg-[#333333] active:bg-[#555555] text-[#FFFFFF]';
   const listeningBtn = listeningMode
     ? (darkMode ? 'bg-[#F5F5F5] text-[#0A0A0A]' : 'bg-[#0A0A0A] text-[#FFFFFF]')
     : iconBtn;
@@ -294,13 +297,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     <div className={`h-dvh flex flex-col ${darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]'}`}>
       {/* Header */}
       <div className={`flex-shrink-0 flex items-center justify-between px-4 py-3 border-b ${headerBg}`}>
-        <div>
-          <h1 className={`font-bold text-base leading-tight ${headerText}`}>#{roomId}</h1>
-          <p className={`text-xs ${subText}`}>{userLanguage}</p>
-        </div>
-        <div className="flex items-center gap-2">
+        <button onClick={copyRoomLink} className="text-left group" title="Copy room link">
+          <h1 className={`font-bold text-base leading-tight ${headerText} group-hover:opacity-70 transition-opacity`}>
+            #{roomId}
+          </h1>
+          <p className={`text-xs ${subText}`}>
+            {copied ? '✓ Copied link' : userLanguage}
+          </p>
+        </button>
 
-          {/* Listening mode toggle */}
+        <div className="flex items-center gap-2">
           <button
             onClick={toggleListening}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${ttsError ? 'bg-red-500/10 text-red-500' : listeningBtn}`}
@@ -356,6 +362,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         hasMore={hasMore}
         onLoadMore={loadMoreMessages}
         loadingMore={loadingMore}
+        speakingMsgId={speakingMsgId}
         t={t}
         darkMode={darkMode}
       />
