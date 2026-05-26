@@ -36,12 +36,8 @@ async function fetchTTSAudio(text, language) {
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
   if (!data.audioContent) throw new Error('No audio returned');
 
-  // base64 MP3 → Blob URL
-  const binary = atob(data.audioContent);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], { type: data.mimeType || 'audio/wav' });
-  return URL.createObjectURL(blob);
+  // data: URL is more compatible with iOS Safari than blob: URLs
+  return `data:audio/mpeg;base64,${data.audioContent}`;
 }
 
 function HeadphonesIcon({ active }) {
