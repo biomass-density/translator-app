@@ -3,7 +3,7 @@ import { LANGUAGES } from '../constants.js';
 
 const LANG_FLAG = Object.fromEntries(LANGUAGES.map(l => [l.name, l.flag]));
 
-export default function ParticipantsPanel({ participants, isOwner, currentUserId, onKick, onClose, t, darkMode }) {
+export default function ParticipantsPanel({ participants, isOwner, ownerId, currentUserId, onKick, onClose, onExportTranscript, t, darkMode }) {
   const [kickingId, setKickingId] = useState(null);
   const [error, setError] = useState('');
 
@@ -24,8 +24,10 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
   const textPrimary = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
   const textSecondary = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
   const divider = darkMode ? 'divide-[#2A2A2A]' : 'divide-[#F0F0F0]';
+  const borderTop = darkMode ? 'border-[#2A2A2A]' : 'border-[#F0F0F0]';
   const closeBtn = darkMode ? 'bg-[#272727] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
   const avatarBg = darkMode ? 'bg-[#333333] text-[#F5F5F5]' : 'bg-[#0A0A0A] text-[#FFFFFF]';
+  const exportBtn = darkMode ? 'bg-[#272727] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#F2F2F2] text-[#6B6B6B] hover:text-[#0A0A0A]';
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-40 p-4">
@@ -48,7 +50,7 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
           </div>
         )}
 
-        <ul className={`max-h-72 overflow-y-auto divide-y ${divider} px-2 pb-4`}>
+        <ul className={`max-h-72 overflow-y-auto divide-y ${divider} px-2`}>
           {participants.map(p => (
             <li key={p.id} className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-3">
@@ -60,6 +62,11 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
                     {p.name}
                     {p.id === currentUserId && (
                       <span className={`text-[10px] font-normal ${textSecondary}`}>({t.you})</span>
+                    )}
+                    {p.id === ownerId && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${darkMode ? 'bg-[#333333] text-[#AAAAAA]' : 'bg-[#F0F0F0] text-[#666666]'}`}>
+                        Host
+                      </span>
                     )}
                   </div>
                   <div className={`text-xs flex items-center gap-1 ${textSecondary}`}>
@@ -80,6 +87,21 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
             </li>
           ))}
         </ul>
+
+        {/* Export transcript */}
+        <div className={`px-4 py-3 border-t ${borderTop}`}>
+          <button
+            onClick={() => { onExportTranscript(); onClose(); }}
+            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm font-medium transition-colors ${exportBtn}`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download transcript
+          </button>
+        </div>
       </div>
     </div>
   );

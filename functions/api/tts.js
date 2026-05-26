@@ -13,10 +13,11 @@ export async function onRequestPost(context) {
   try { body = await request.json(); }
   catch { return Response.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  const { text, language } = body;
+  const { text, language, speed } = body;
   if (!text || !language) {
     return Response.json({ error: 'Missing text or language' }, { status: 400 });
   }
+  const speakingRate = (typeof speed === 'number' && speed > 0) ? Math.min(Math.max(speed, 0.25), 4.0) : 1.0;
 
   const apiKey = env.GOOGLE_TTS_API_KEY;
   if (!apiKey) {
@@ -33,7 +34,7 @@ export async function onRequestPost(context) {
       body: JSON.stringify({
         input: { text },
         voice: { languageCode: voice.languageCode, name: voice.name },
-        audioConfig: { audioEncoding: 'MP3' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate },
       }),
     }
   );

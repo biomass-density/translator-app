@@ -24,11 +24,14 @@ async function translateText(text, targetLanguages) {
   return data;
 }
 
-async function fetchTTSAudio(text, language) {
+const TTS_SPEEDS = [0.75, 1, 1.5];
+const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.5: '1.5×' };
+
+async function fetchTTSAudio(text, language, speed = 1) {
   const res = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, language }),
+    body: JSON.stringify({ text, language, speed }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
@@ -69,6 +72,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [queueLength, setQueueLength] = useState(0);
   const [copied, setCopied] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [ttsSpeed, setTtsSpeed] = useState(1);
+  const [ownerId, setOwnerId] = useState(null);
+  const ttsSpeedRef = useRef(1);
 
   const t = getT(userLanguage);
 
@@ -146,7 +152,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   async function fetchAndEnqueue(text, msgId) {
     try {
-      const base64 = await fetchTTSAudio(text, userLanguage);
+      const base64 = await fetchTTSAudio(text, userLanguage, ttsSpeedRef.current);
       setTtsError('');
       audioQueueRef.current.push({ base64, msgId });
       setQueueLength(audioQueueRef.current.length + (isPlayingRef.current ? 1 : 0));
@@ -172,6 +178,15 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       setTtsError('');
     }
     setListeningMode(prev => !prev);
+  }
+
+  function cycleSpeed() {
+    setTtsSpeed(prev => {
+      const idx = TTS_SPEEDS.indexOf(prev);
+      const next = TTS_SPEEDS[(idx + 1) % TTS_SPEEDS.length];
+      ttsSpeedRef.current = next;
+      return next;
+    });
   }
 
   function copyRoomLink() {
@@ -253,11 +268,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const participantsRef = useRef(participants);
   useEffect(() => { participantsRef.current = participants; }, [participants]);
 
-  // Watch for room deletion or being kicked
+  // Watch for room deletion or being kicked; also read ownerId
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
     const unsubRoom = onSnapshot(roomRef, (s) => {
       if (!s.exists()) onLeave();
+      else setOwnerId(s.data().createdBy ?? null);
     }, (err) => console.error('Room watch error:', err));
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
@@ -341,6 +357,45 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
+  function exportTranscript() {
+    const dateStr = new Date().toLocaleString();
+    const lines = [
+      `BabelChat — Room #${roomId}`,
+      `Exported: ${dateStr}`,
+      `Your language: ${userLanguage}`,
+      '',
+    ];
+
+    for (const msg of messages) {
+      const time = msg.timestamp
+        ? new Date(msg.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+        : '';
+      if (msg.isSystem) {
+        if (msg.action === 'join') lines.push(`[${time}] — ${msg.senderName} joined`);
+        else if (msg.action === 'leave') lines.push(`[${time}] — ${msg.senderName} left`);
+        else if (msg.action === 'kick') lines.push(`[${time}] — ${msg.senderName} was removed by ${msg.kickerName}`);
+      } else {
+        const isOwn = msg.senderId === userId;
+        const label = isOwn ? `${msg.senderName} (you)` : msg.senderName;
+        lines.push(`[${time}] ${label}: ${msg.text}`);
+        const translation = msg.translations?.[userLanguage];
+        if (translation && msg.originalLanguage !== userLanguage) {
+          lines.push(`  → ${translation}`);
+        }
+      }
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `babelchat-${roomId}-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   const headerBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
   const headerText = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
   const subText = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
@@ -381,6 +436,17 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               </span>
             )}
           </button>
+
+          {/* TTS speed toggle — only visible when listening */}
+          {listeningMode && !ttsError && (
+            <button
+              onClick={cycleSpeed}
+              className={`text-xs font-semibold px-2 py-1.5 rounded-full transition-colors ${iconBtn}`}
+              title="Cycle TTS speed"
+            >
+              {TTS_SPEED_LABELS[ttsSpeed]}
+            </button>
+          )}
 
           {/* Participants button */}
           <button
@@ -478,9 +544,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         <ParticipantsPanel
           participants={participants}
           isOwner={isOwner}
+          ownerId={ownerId}
           currentUserId={userId}
           onKick={onKick}
           onClose={() => setShowParticipants(false)}
+          onExportTranscript={exportTranscript}
           t={t}
           darkMode={darkMode}
         />
