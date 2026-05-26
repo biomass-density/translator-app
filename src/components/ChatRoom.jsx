@@ -12,9 +12,7 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
-// Minimal silent WAV — played on toggle click to unlock iOS audio
-const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-
+// Minimal silent WAV — no longer needed, removed
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
     method: 'POST',
@@ -35,9 +33,14 @@ async function fetchTTSAudio(text, language) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
   if (!data.audioContent) throw new Error('No audio returned');
+  return data.audioContent; // raw base64 MP3
+}
 
-  // data: URL is more compatible with iOS Safari than blob: URLs
-  return `data:audio/mpeg;base64,${data.audioContent}`;
+function base64ToArrayBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
 
 function HeadphonesIcon({ active }) {
@@ -65,49 +68,51 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   const t = getT(userLanguage);
 
-  // Audio queue — one persistent Audio element, reused for every message
-  const audioRef = useRef(null);       // single unlocked Audio element
-  const audioQueueRef = useRef([]);    // pending data: URLs
+  // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
+  const audioCtxRef = useRef(null);
+  const currentSourceRef = useRef(null);
+  const audioQueueRef = useRef([]);   // queue of base64 MP3 strings
   const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
 
-  function playNext() {
+  async function playNext() {
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       return;
     }
-    const audio = audioRef.current;
-    if (!audio) { isPlayingRef.current = false; return; }
+    const ctx = audioCtxRef.current;
+    if (!ctx) { isPlayingRef.current = false; return; }
 
-    const url = audioQueueRef.current.shift();
+    const base64 = audioQueueRef.current.shift();
     isPlayingRef.current = true;
 
-    audio.onended = () => playNext();
-    audio.onerror = () => {
-      setTtsError('Audio decode error — invalid audio data');
+    try {
+      const arrayBuffer = base64ToArrayBuffer(base64);
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      currentSourceRef.current = source;
+      source.onended = () => { currentSourceRef.current = null; playNext(); };
+      source.start(0);
+    } catch (err) {
+      setTtsError(`Audio error: ${err.message}`);
       playNext();
-    };
-
-    // Reuse same element: change src and play — stays unlocked on iOS
-    audio.src = url;
-    audio.play().catch(err => {
-      setTtsError(`${err.name}: ${err.message}`);
-      playNext();
-    });
+    }
   }
 
   function stopAllAudio() {
-    const audio = audioRef.current;
-    if (audio) { audio.pause(); audio.onended = null; audio.onerror = null; audio.src = ''; }
+    try { currentSourceRef.current?.stop(); } catch (_) {}
+    currentSourceRef.current = null;
     audioQueueRef.current = [];
     isPlayingRef.current = false;
   }
 
   async function fetchAndEnqueue(text) {
     try {
-      const url = await fetchTTSAudio(text, userLanguage);
+      const base64 = await fetchTTSAudio(text, userLanguage);
       setTtsError('');
-      audioQueueRef.current.push(url);
+      audioQueueRef.current.push(base64);
       if (!isPlayingRef.current) playNext();
     } catch (err) {
       console.error('TTS error:', err.message);
@@ -117,10 +122,13 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   function toggleListening() {
     if (!listeningMode) {
-      // Create Audio element HERE on user gesture — iOS unlocks it permanently
-      const audio = new Audio(SILENT_WAV);
-      audio.play().catch(() => {});
-      audioRef.current = audio;
+      // Create AudioContext on user gesture — iOS unlocks it for all future async calls
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        ctx.resume();
+        audioCtxRef.current = ctx;
+      }
       setTtsError('');
       spokenIdsRef.current = new Set(messages.map(m => m.id));
     } else {
@@ -156,7 +164,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   }, [messages, listeningMode]);
 
   // Clean up audio on unmount
-  useEffect(() => () => stopAllAudio(), []);
+  useEffect(() => () => {
+    stopAllAudio();
+    audioCtxRef.current?.close();
+  }, []);
 
   // Stale closure fix for participants
   const participantsRef = useRef(participants);
