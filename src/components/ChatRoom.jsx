@@ -74,7 +74,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [ttsSpeed, setTtsSpeed] = useState(1);
   const [ownerId, setOwnerId] = useState(null);
+  const [showEndModal, setShowEndModal] = useState(false);
   const ttsSpeedRef = useRef(1);
+  const roomDeletedRef = useRef(false);
 
   const t = getT(userLanguage);
 
@@ -277,12 +279,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   useEffect(() => {
     const roomRef = doc(db, 'rooms', roomId);
     const unsubRoom = onSnapshot(roomRef, (s) => {
-      if (!s.exists()) onLeave();
+      if (!s.exists()) { if (!roomDeletedRef.current) onLeave(); }
       else setOwnerId(s.data().createdBy ?? null);
     }, (err) => console.error('Room watch error:', err));
     const partRef = doc(db, 'rooms', roomId, 'participants', userId);
     const unsubMe = onSnapshot(partRef, (s) => {
-      if (!s.exists()) onLeave();
+      if (!s.exists() && !roomDeletedRef.current) onLeave();
     }, (err) => console.error('Participant watch error:', err));
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
@@ -361,6 +363,14 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       setSendError(t.errorSending);
     }
   };
+
+  async function handleDeleteConfirm() {
+    roomDeletedRef.current = true;
+    await onDelete(); // Firestore cleanup — does not clear session
+    stopAllAudio();
+    setShowDeleteModal(false);
+    setShowEndModal(true);
+  }
 
   function exportTranscript() {
     const lines = [];
@@ -535,7 +545,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           currentUserId={userId}
           onKick={onKick}
           onClose={() => setShowParticipants(false)}
-          onExportTranscript={exportTranscript}
           t={t}
           darkMode={darkMode}
         />
@@ -543,11 +552,40 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
       {showDeleteModal && (
         <DeleteModal
-          onConfirm={onDelete}
+          onConfirm={handleDeleteConfirm}
           onCancel={() => setShowDeleteModal(false)}
           t={t}
           darkMode={darkMode}
         />
+      )}
+
+      {showEndModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
+          <div className={`${darkMode ? 'bg-[#1A1A1A]' : 'bg-[#FFFFFF]'} rounded-3xl p-8 w-full max-w-sm shadow-xl flex flex-col items-center gap-4 text-center`}>
+            <span className="text-5xl">🙏</span>
+            <div>
+              <h2 className={`font-bold text-xl mb-1 ${darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]'}`}>Thanks for joining!</h2>
+              <p className={`text-sm ${darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]'}`}>The session has ended.</p>
+            </div>
+            <button
+              onClick={exportTranscript}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-colors ${darkMode ? 'bg-[#272727] text-[#F5F5F5] hover:bg-[#333333]' : 'bg-[#F2F2F2] text-[#0A0A0A] hover:bg-[#E5E5E5]'}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Download transcript
+            </button>
+            <button
+              onClick={onLeave}
+              className={`w-full py-3 rounded-2xl text-sm font-semibold transition-colors ${darkMode ? 'bg-[#F5F5F5] text-[#0A0A0A] hover:bg-[#DDDDDD]' : 'bg-[#0A0A0A] text-[#FFFFFF] hover:bg-[#333333]'}`}
+            >
+              Back to home
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

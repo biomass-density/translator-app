@@ -183,7 +183,9 @@ export default function App() {
     }
   }
 
-  async function handleDeleteRoom() {
+  // Deletes all Firestore data but intentionally does NOT clear the session —
+  // ChatRoom shows the end-of-session modal first, then calls onLeave to exit.
+  async function handleDeleteRoomData() {
     if (!session || !userId) return;
     const { roomId } = session;
     const batch = writeBatch(db);
@@ -204,8 +206,6 @@ export default function App() {
       return updated;
     });
     localStorage.removeItem(SESSION_KEY);
-    setSession(null);
-    window.history.pushState(null, '', '/');
   }
 
   async function handleKickParticipant(kickedUserId, kickedUserName) {
@@ -279,7 +279,7 @@ export default function App() {
         isOwner={session.isOwner}
         darkMode={darkMode}
         onLeave={handleLeaveRoom}
-        onDelete={handleDeleteRoom}
+        onDelete={handleDeleteRoomData}
         onKick={handleKickParticipant}
       />
     );
