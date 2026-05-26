@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   collection, doc, setDoc, onSnapshot,
   query, orderBy, limit, startAfter, getDocs
@@ -12,6 +12,14 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
+const LANG_CODES = {
+  English: 'en-US',
+  German: 'de-DE',
+  Russian: 'ru-RU',
+  Polish: 'pl-PL',
+  Ukrainian: 'uk-UA',
+};
+
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
     method: 'POST',
@@ -19,10 +27,17 @@ async function translateText(text, targetLanguages) {
     body: JSON.stringify({ text, targetLanguages }),
   });
   const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Translation request failed');
-  }
+  if (!res.ok) throw new Error(data.error || 'Translation request failed');
   return data;
+}
+
+function HeadphonesIcon({ active }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+      <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+    </svg>
+  );
 }
 
 export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwner, darkMode, onLeave, onDelete, onKick }) {
@@ -36,10 +51,85 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [lastVisible, setLastVisible] = useState(null);
+  const [listeningMode, setListeningMode] = useState(false);
 
   const t = getT(userLanguage);
 
-  // Ref keeps target-language list current inside async handleSend without stale closure
+  // Speech synthesis queue
+  const speechQueueRef = useRef([]);
+  const isSpeakingRef = useRef(false);
+  const spokenIdsRef = useRef(new Set());
+
+  function speakNext() {
+    if (speechQueueRef.current.length === 0) {
+      isSpeakingRef.current = false;
+      return;
+    }
+    const text = speechQueueRef.current.shift();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = LANG_CODES[userLanguage] || 'en-US';
+    utterance.rate = 1.0;
+    utterance.onend = speakNext;
+    utterance.onerror = speakNext;
+    isSpeakingRef.current = true;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function enqueue(text) {
+    speechQueueRef.current.push(text);
+    if (!isSpeakingRef.current) speakNext();
+  }
+
+  // Toggle listening mode
+  function toggleListening() {
+    if (!listeningMode) {
+      // Prime audio context on user gesture (required for iOS)
+      if (window.speechSynthesis) {
+        const primer = new SpeechSynthesisUtterance('');
+        window.speechSynthesis.speak(primer);
+        window.speechSynthesis.cancel();
+      }
+      // Mark all current messages as already spoken so we only speak new ones
+      spokenIdsRef.current = new Set(messages.map(m => m.id));
+    } else {
+      window.speechSynthesis?.cancel();
+      speechQueueRef.current = [];
+      isSpeakingRef.current = false;
+    }
+    setListeningMode(prev => !prev);
+  }
+
+  // Watch messages for new speakable content
+  useEffect(() => {
+    if (!listeningMode || !window.speechSynthesis) return;
+
+    for (const msg of messages) {
+      if (spokenIdsRef.current.has(msg.id)) continue;
+      if (msg.isSystem || msg.senderId === userId) {
+        spokenIdsRef.current.add(msg.id);
+        continue;
+      }
+
+      const needsTranslation = msg.originalLanguage !== userLanguage;
+      const translation = msg.translations?.[userLanguage];
+
+      // Wait until translation is ready (re-fires when message updates with translation)
+      if (needsTranslation && !translation && !msg.translationFailed) continue;
+
+      const text = needsTranslation && translation ? translation : msg.text;
+      spokenIdsRef.current.add(msg.id);
+      enqueue(text);
+    }
+  }, [messages, listeningMode]);
+
+  // Cancel speech when unmounting
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  // Stale closure fix for participants
   const participantsRef = useRef(participants);
   useEffect(() => { participantsRef.current = participants; }, [participants]);
 
@@ -58,7 +148,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
 
-  // Real-time messages — latest 50 descending, reversed for display
+  // Real-time messages
   useEffect(() => {
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     const q = query(msgsRef, orderBy('timestamp', 'desc'), limit(PAGE_SIZE));
@@ -156,6 +246,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const sendBtn = darkMode
     ? 'bg-[#F5F5F5] hover:bg-[#DDDDDD] active:bg-[#CCCCCC] text-[#0A0A0A]'
     : 'bg-[#0A0A0A] hover:bg-[#333333] active:bg-[#555555] text-[#FFFFFF]';
+  const listeningBtn = listeningMode
+    ? (darkMode ? 'bg-[#F5F5F5] text-[#0A0A0A]' : 'bg-[#0A0A0A] text-[#FFFFFF]')
+    : iconBtn;
 
   return (
     <div className={`h-dvh flex flex-col ${darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]'}`}>
@@ -166,6 +259,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           <p className={`text-xs ${subText}`}>{userLanguage}</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Listening mode toggle */}
+          <button
+            onClick={toggleListening}
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${listeningBtn}`}
+            title={listeningMode ? 'Stop listening' : 'Start listening mode'}
+          >
+            <HeadphonesIcon active={listeningMode} />
+            {listeningMode && <span className="text-xs font-medium">Live</span>}
+          </button>
+
           <button
             onClick={() => setShowParticipants(true)}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
@@ -177,6 +280,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             </svg>
             {participants.length}
           </button>
+
           {isOwner && (
             <button
               onClick={() => setShowDeleteModal(true)}
