@@ -4,7 +4,7 @@ import {
   query, orderBy, limit, startAfter, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
-import { getT, LANGUAGES } from '../constants.js';
+import { getT } from '../constants.js';
 import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
 import DeleteModal from './DeleteModal.jsx';
@@ -12,8 +12,6 @@ import DeleteModal from './DeleteModal.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
-// Map language name → flag emoji
-const LANG_FLAG = Object.fromEntries(LANGUAGES.map(l => [l.name, l.flag]));
 
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
@@ -343,11 +341,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
-  // Unique active language flags (excluding self)
-  const activeLangFlags = [...new Set(
-    participants.filter(p => p.language !== userLanguage).map(p => LANG_FLAG[p.language]).filter(Boolean)
-  )];
-
   const headerBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
   const headerText = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
   const subText = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
@@ -389,14 +382,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
             )}
           </button>
 
-          {/* Participants button with language flags */}
+          {/* Participants button */}
           <button
             onClick={() => setShowParticipants(true)}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
           >
-            {activeLangFlags.length > 0 && (
-              <span className="text-sm leading-none">{activeLangFlags.join('')}</span>
-            )}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />

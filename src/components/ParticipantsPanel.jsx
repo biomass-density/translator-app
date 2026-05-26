@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { LANGUAGES } from '../constants.js';
+
+const LANG_FLAG = Object.fromEntries(LANGUAGES.map(l => [l.name, l.flag]));
 
 export default function ParticipantsPanel({ participants, isOwner, currentUserId, onKick, onClose, t, darkMode }) {
   const [kickingId, setKickingId] = useState(null);
@@ -59,7 +62,10 @@ export default function ParticipantsPanel({ participants, isOwner, currentUserId
                       <span className={`text-[10px] font-normal ${textSecondary}`}>({t.you})</span>
                     )}
                   </div>
-                  <div className={`text-xs ${textSecondary}`}>{p.language}</div>
+                  <div className={`text-xs flex items-center gap-1 ${textSecondary}`}>
+                    {LANG_FLAG[p.language] && <span>{LANG_FLAG[p.language]}</span>}
+                    {p.language}
+                  </div>
                 </div>
               </div>
               {isOwner && p.id !== currentUserId && (
