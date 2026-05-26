@@ -24,14 +24,14 @@ async function translateText(text, targetLanguages) {
   return data;
 }
 
-const TTS_SPEEDS = [0.75, 1, 1.5];
-const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.5: '1.5×' };
+const TTS_SPEEDS = [0.75, 1, 1.25, 1.5];
+const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.25: '1.25×', 1.5: '1.5×' };
 
-async function fetchTTSAudio(text, language, speed = 1) {
+async function fetchTTSAudio(text, language) {
   const res = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, language, speed }),
+    body: JSON.stringify({ text, language }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
@@ -131,6 +131,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
+      source.playbackRate.value = ttsSpeedRef.current;
       currentSourceRef.current = source;
       source.onended = () => { currentSourceRef.current = null; playNext(); };
       source.start(0);
@@ -152,7 +153,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   async function fetchAndEnqueue(text, msgId) {
     try {
-      const base64 = await fetchTTSAudio(text, userLanguage, ttsSpeedRef.current);
+      const base64 = await fetchTTSAudio(text, userLanguage);
       setTtsError('');
       audioQueueRef.current.push({ base64, msgId });
       setQueueLength(audioQueueRef.current.length + (isPlayingRef.current ? 1 : 0));
@@ -185,6 +186,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const idx = TTS_SPEEDS.indexOf(prev);
       const next = TTS_SPEEDS[(idx + 1) % TTS_SPEEDS.length];
       ttsSpeedRef.current = next;
+      // Apply immediately to the currently playing source
+      if (currentSourceRef.current) {
+        currentSourceRef.current.playbackRate.value = next;
+      }
       return next;
     });
   }
