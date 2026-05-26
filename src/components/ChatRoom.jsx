@@ -40,7 +40,7 @@ async function fetchTTSAudio(text, language) {
   const binary = atob(data.audioContent);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], { type: 'audio/mpeg' });
+  const blob = new Blob([bytes], { type: 'audio/wav' });
   return URL.createObjectURL(blob);
 }
 
