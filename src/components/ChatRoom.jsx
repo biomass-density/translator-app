@@ -4,13 +4,16 @@ import {
   query, orderBy, limit, startAfter, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase.js';
-import { getT } from '../constants.js';
+import { getT, LANGUAGES } from '../constants.js';
 import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
 import DeleteModal from './DeleteModal.jsx';
 
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
+
+// Map language name → flag emoji
+const LANG_FLAG = Object.fromEntries(LANGUAGES.map(l => [l.name, l.flag]));
 
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
@@ -65,9 +68,20 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const [listeningMode, setListeningMode] = useState(false);
   const [ttsError, setTtsError] = useState('');
   const [speakingMsgId, setSpeakingMsgId] = useState(null);
+  const [queueLength, setQueueLength] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   const t = getT(userLanguage);
+
+  // Online / offline detection
+  useEffect(() => {
+    const setOn = () => setIsOnline(true);
+    const setOff = () => setIsOnline(false);
+    window.addEventListener('online', setOn);
+    window.addEventListener('offline', setOff);
+    return () => { window.removeEventListener('online', setOn); window.removeEventListener('offline', setOff); };
+  }, []);
 
   // Screen wake lock — keeps display on while in a room
   useEffect(() => {
@@ -96,12 +110,14 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
       setSpeakingMsgId(null);
+      setQueueLength(0);
       return;
     }
     const ctx = audioCtxRef.current;
     if (!ctx) { isPlayingRef.current = false; return; }
 
     const { base64, msgId } = audioQueueRef.current.shift();
+    setQueueLength(audioQueueRef.current.length);
     isPlayingRef.current = true;
     setSpeakingMsgId(msgId);
 
@@ -127,6 +143,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     audioQueueRef.current = [];
     isPlayingRef.current = false;
     setSpeakingMsgId(null);
+    setQueueLength(0);
   }
 
   async function fetchAndEnqueue(text, msgId) {
@@ -134,6 +151,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const base64 = await fetchTTSAudio(text, userLanguage);
       setTtsError('');
       audioQueueRef.current.push({ base64, msgId });
+      setQueueLength(audioQueueRef.current.length + (isPlayingRef.current ? 1 : 0));
       if (!isPlayingRef.current) playNext();
     } catch (err) {
       console.error('TTS error:', err.message);
@@ -184,7 +202,50 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   }, [messages, listeningMode]);
 
-  // Clean up audio and wake lock on unmount
+  // Session history — retroactively translate messages missing our language
+  const translatingIdsRef = useRef(new Set());
+  useEffect(() => {
+    const missing = messages.filter(msg =>
+      !msg.isSystem &&
+      msg.senderId !== userId &&
+      msg.originalLanguage !== userLanguage &&
+      !msg.translations?.[userLanguage] &&
+      !msg.translationFailed &&
+      !translatingIdsRef.current.has(msg.id)
+    );
+    if (missing.length === 0) return;
+
+    missing.forEach(msg => translatingIdsRef.current.add(msg.id));
+
+    // Stagger calls 400ms apart to avoid rate limiting
+    missing.forEach((msg, i) => {
+      setTimeout(async () => {
+        try {
+          const result = await translateText(msg.text, [userLanguage]);
+          const msgRef = doc(db, 'rooms', roomId, 'messages', msg.id);
+          await setDoc(msgRef, { translations: result.translations ?? {} }, { merge: true });
+        } catch (err) {
+          console.error('Retroactive translation error:', err.message);
+          translatingIdsRef.current.delete(msg.id); // allow retry
+        }
+      }, i * 400);
+    });
+  }, [messages, userLanguage, userId, roomId]);
+
+  // Retry a failed translation manually
+  const retryTranslation = async (msg) => {
+    const msgRef = doc(db, 'rooms', roomId, 'messages', msg.id);
+    translatingIdsRef.current.delete(msg.id);
+    await setDoc(msgRef, { translationFailed: false, translations: {} }, { merge: true });
+    try {
+      const result = await translateText(msg.text, [userLanguage]);
+      await setDoc(msgRef, { translations: result.translations ?? {} }, { merge: true });
+    } catch (err) {
+      await setDoc(msgRef, { translationFailed: true }, { merge: true }).catch(() => {});
+    }
+  };
+
+  // Clean up audio on unmount
   useEffect(() => () => {
     stopAllAudio();
     audioCtxRef.current?.close();
@@ -282,6 +343,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
+  // Unique active language flags (excluding self)
+  const activeLangFlags = [...new Set(
+    participants.filter(p => p.language !== userLanguage).map(p => LANG_FLAG[p.language]).filter(Boolean)
+  )];
+
   const headerBg = darkMode ? 'bg-[#0A0A0A] border-[#2A2A2A]' : 'bg-[#FFFFFF] border-[#E5E5E5]';
   const headerText = darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]';
   const subText = darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]';
@@ -307,20 +373,30 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         </button>
 
         <div className="flex items-center gap-2">
+          {/* Listening / TTS button */}
           <button
             onClick={toggleListening}
-            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${ttsError ? 'bg-red-500/10 text-red-500' : listeningBtn}`}
+            className={`relative flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${ttsError ? 'bg-red-500/10 text-red-500' : listeningBtn}`}
             title={listeningMode ? 'Stop listening' : 'Listen to messages aloud'}
           >
             <HeadphonesIcon active={listeningMode} />
             {listeningMode && !ttsError && <span className="text-xs font-medium">Live</span>}
             {ttsError && <span className="text-xs font-medium">Error</span>}
+            {listeningMode && !ttsError && queueLength > 0 && (
+              <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${darkMode ? 'bg-[#888888] text-[#0A0A0A]' : 'bg-[#6B6B6B] text-[#FFFFFF]'}`}>
+                {queueLength}
+              </span>
+            )}
           </button>
 
+          {/* Participants button with language flags */}
           <button
             onClick={() => setShowParticipants(true)}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
           >
+            {activeLangFlags.length > 0 && (
+              <span className="text-sm leading-none">{activeLangFlags.join('')}</span>
+            )}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
@@ -347,6 +423,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         </div>
       </div>
 
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-yellow-500">
+            <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01" />
+          </svg>
+          <p className="text-xs text-yellow-600 dark:text-yellow-400">No internet connection — messages may not sync</p>
+        </div>
+      )}
+
       {/* TTS error banner */}
       {ttsError && (
         <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20">
@@ -363,6 +449,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         onLoadMore={loadMoreMessages}
         loadingMore={loadingMore}
         speakingMsgId={speakingMsgId}
+        onRetryTranslation={retryTranslation}
         t={t}
         darkMode={darkMode}
       />

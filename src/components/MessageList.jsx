@@ -5,11 +5,36 @@ function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function MessageList({ messages, currentUserId, userLanguage, hasMore, onLoadMore, loadingMore, speakingMsgId, t, darkMode }) {
+function formatDateLabel(timestamp) {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], {
+    month: 'long', day: 'numeric',
+    ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
+  });
+}
+
+function isSameDay(ts1, ts2) {
+  if (!ts1 || !ts2) return false;
+  return new Date(ts1).toDateString() === new Date(ts2).toDateString();
+}
+
+export default function MessageList({
+  messages, currentUserId, userLanguage,
+  hasMore, onLoadMore, loadingMore,
+  speakingMsgId, onRetryTranslation,
+  t, darkMode,
+}) {
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
   const prevLengthRef = useRef(messages.length);
   const [expandedIds, setExpandedIds] = useState(new Set());
+  const [retryingIds, setRetryingIds] = useState(new Set());
 
   // Auto-scroll only if user is near the bottom (within 150px)
   useEffect(() => {
@@ -27,7 +52,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
     }
   }, [messages.length]);
 
-  // Always scroll to bottom on initial load
+  // Scroll to bottom on initial load
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'instant' });
   }, []);
@@ -38,6 +63,15 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const handleRetry = async (msg) => {
+    setRetryingIds(prev => new Set(prev).add(msg.id));
+    try {
+      await onRetryTranslation(msg);
+    } finally {
+      setRetryingIds(prev => { const s = new Set(prev); s.delete(msg.id); return s; });
+    }
   };
 
   const bg = darkMode ? 'bg-[#0A0A0A]' : 'bg-[#FAFAFA]';
@@ -53,6 +87,7 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
   const loadMoreBg = darkMode ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#EFEFEF] text-[#6B6B6B] hover:text-[#0A0A0A]';
   const ownTranslatingColor = darkMode ? 'text-[#0A0A0A]/50' : 'text-[#FFFFFF]/60';
   const emptyText = darkMode ? 'text-[#444444]' : 'text-[#CCCCCC]';
+  const dateLabelColor = darkMode ? 'text-[#555555]' : 'text-[#BBBBBB]';
 
   const nonSystemMessages = messages.filter(m => !m.isSystem);
 
@@ -80,15 +115,29 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
       )}
 
       {messages.map((msg, i) => {
+        const prevMsg = messages[i - 1];
+
+        // Date separator
+        const showDateSep = !isSameDay(msg.timestamp, prevMsg?.timestamp);
+
         if (msg.isSystem) {
           return (
-            <div key={msg.id} className="flex justify-center py-2">
-              <span className={`text-xs ${systemText}`}>
-                {msg.action === 'join' && t.joinedRoom(msg.senderName)}
-                {msg.action === 'leave' && t.leftRoom(msg.senderName)}
-                {msg.action === 'kick' && t.kickedFrom(msg.senderName, msg.kickerName)}
-              </span>
-            </div>
+            <React.Fragment key={msg.id}>
+              {showDateSep && (
+                <div className="flex items-center gap-3 py-3">
+                  <div className={`flex-1 h-px ${darkMode ? 'bg-[#2A2A2A]' : 'bg-[#E5E5E5]'}`} />
+                  <span className={`text-[11px] font-medium ${dateLabelColor}`}>{formatDateLabel(msg.timestamp)}</span>
+                  <div className={`flex-1 h-px ${darkMode ? 'bg-[#2A2A2A]' : 'bg-[#E5E5E5]'}`} />
+                </div>
+              )}
+              <div className="flex justify-center py-1">
+                <span className={`text-xs ${systemText}`}>
+                  {msg.action === 'join' && t.joinedRoom(msg.senderName)}
+                  {msg.action === 'leave' && t.leftRoom(msg.senderName)}
+                  {msg.action === 'kick' && t.kickedFrom(msg.senderName, msg.kickerName)}
+                </span>
+              </div>
+            </React.Fragment>
           );
         }
 
@@ -98,9 +147,9 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
         const needsTranslation = !isOwn && msg.originalLanguage !== userLanguage;
         const showTranslation = needsTranslation && translation;
         const isExpanded = expandedIds.has(msg.id);
+        const isRetrying = retryingIds.has(msg.id);
 
-        const prevMsg = messages[i - 1];
-        const isGrouped = prevMsg && !prevMsg.isSystem && prevMsg.senderId === msg.senderId;
+        const isGrouped = prevMsg && !prevMsg.isSystem && prevMsg.senderId === msg.senderId && !showDateSep;
 
         const bubbleClass = isOwn
           ? `${ownBubble} rounded-[18px] rounded-br-[4px]`
@@ -109,54 +158,69 @@ export default function MessageList({ messages, currentUserId, userLanguage, has
             : `${otherBubble} rounded-[18px] rounded-bl-[4px]`;
 
         return (
-          <div
-            key={msg.id}
-            className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isGrouped ? 'mt-0.5' : 'mt-3'}`}
-          >
-            {!isOwn && !isGrouped && (
-              <span className={`text-xs font-medium mb-1 px-1 ${senderLabel}`}>
-                {msg.senderName}
-              </span>
+          <React.Fragment key={msg.id}>
+            {showDateSep && (
+              <div className="flex items-center gap-3 py-3">
+                <div className={`flex-1 h-px ${darkMode ? 'bg-[#2A2A2A]' : 'bg-[#E5E5E5]'}`} />
+                <span className={`text-[11px] font-medium ${dateLabelColor}`}>{formatDateLabel(msg.timestamp)}</span>
+                <div className={`flex-1 h-px ${darkMode ? 'bg-[#2A2A2A]' : 'bg-[#E5E5E5]'}`} />
+              </div>
             )}
-
-            <div className={`max-w-[75%] px-4 py-2.5 text-sm leading-relaxed transition-all ${bubbleClass}`}>
-              {isSpeaking && (
-                <div className="flex items-center gap-1 mb-1.5">
-                  <span className="flex gap-0.5 items-end" style={{ height: '12px' }}>
-                    <span className="soundbar-bar" style={{ height: '6px', animationDelay: '0ms' }} />
-                    <span className="soundbar-bar" style={{ height: '10px', animationDelay: '150ms' }} />
-                    <span className="soundbar-bar" style={{ height: '6px', animationDelay: '300ms' }} />
-                  </span>
-                </div>
+            <div className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isGrouped ? 'mt-0.5' : 'mt-3'}`}>
+              {!isOwn && !isGrouped && (
+                <span className={`text-xs font-medium mb-1 px-1 ${senderLabel}`}>
+                  {msg.senderName}
+                </span>
               )}
-              {showTranslation ? (
-                <>
-                  <p>{translation}</p>
-                  <div className={`mt-1.5 pt-1.5 border-t ${dividerColor}`}>
-                    <button
-                      onClick={() => toggleOriginal(msg.id)}
-                      className={`text-[11px] font-medium transition-colors ${toggleColor}`}
-                    >
-                      {isExpanded ? t.hideOriginal : t.showOriginal}
-                    </button>
-                    {isExpanded && (
-                      <p className={`text-[12px] mt-1 ${originalLabel} italic`}>{msg.text}</p>
-                    )}
+
+              <div className={`max-w-[75%] px-4 py-2.5 text-sm leading-relaxed transition-all ${bubbleClass}`}>
+                {isSpeaking && (
+                  <div className="flex items-center gap-1 mb-1.5">
+                    <span className="flex gap-0.5 items-end" style={{ height: '12px' }}>
+                      <span className="soundbar-bar" style={{ height: '6px', animationDelay: '0ms' }} />
+                      <span className="soundbar-bar" style={{ height: '10px', animationDelay: '150ms' }} />
+                      <span className="soundbar-bar" style={{ height: '6px', animationDelay: '300ms' }} />
+                    </span>
                   </div>
-                </>
-              ) : needsTranslation && msg.translationFailed ? (
-                <p className="text-red-400 italic text-xs">{t.translationUnavailable}</p>
-              ) : needsTranslation && !translation ? (
-                <p className={`italic text-xs ${isOwn ? ownTranslatingColor : originalLabel}`}>{t.translating}</p>
-              ) : (
-                <p>{msg.text}</p>
-              )}
-            </div>
+                )}
+                {showTranslation ? (
+                  <>
+                    <p>{translation}</p>
+                    <div className={`mt-1.5 pt-1.5 border-t ${dividerColor}`}>
+                      <button
+                        onClick={() => toggleOriginal(msg.id)}
+                        className={`text-[11px] font-medium transition-colors ${toggleColor}`}
+                      >
+                        {isExpanded ? t.hideOriginal : t.showOriginal}
+                      </button>
+                      {isExpanded && (
+                        <p className={`text-[12px] mt-1 ${originalLabel} italic`}>{msg.text}</p>
+                      )}
+                    </div>
+                  </>
+                ) : needsTranslation && msg.translationFailed ? (
+                  <div>
+                    <p className="text-red-400 italic text-xs mb-1">{t.translationUnavailable}</p>
+                    <button
+                      onClick={() => handleRetry(msg)}
+                      disabled={isRetrying}
+                      className={`text-[11px] font-medium transition-colors disabled:opacity-50 ${toggleColor}`}
+                    >
+                      {isRetrying ? '...' : '↻ Retry'}
+                    </button>
+                  </div>
+                ) : needsTranslation && !translation ? (
+                  <p className={`italic text-xs ${isOwn ? ownTranslatingColor : originalLabel}`}>{t.translating}</p>
+                ) : (
+                  <p>{msg.text}</p>
+                )}
+              </div>
 
-            <span className={`text-[10px] mt-0.5 px-1 ${timestampColor}`}>
-              {formatTime(msg.timestamp)}
-            </span>
-          </div>
+              <span className={`text-[10px] mt-0.5 px-1 ${timestampColor}`}>
+                {formatTime(msg.timestamp)}
+              </span>
+            </div>
+          </React.Fragment>
         );
       })}
 
