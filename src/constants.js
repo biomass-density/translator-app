@@ -61,6 +61,12 @@ export const UI_STRINGS = {
     joinedRoom: (name) => `${name} joined the room`,
     leftRoom: (name) => `${name} left the room`,
     kickedFrom: (kicked, kicker) => `${kicked} was removed by ${kicker}`,
+    thanksForJoining: 'Thanks for joining!',
+    sessionEndedHost: 'The session has ended.',
+    sessionEndedParticipant: 'The host has ended the session.',
+    downloadTranscript: 'Download transcript',
+    backToHome: 'Back to home',
+    endSession: 'End Session',
   },
 
   German: {
@@ -115,6 +121,12 @@ export const UI_STRINGS = {
     joinedRoom: (name) => `${name} hat den Raum betreten`,
     leftRoom: (name) => `${name} hat den Raum verlassen`,
     kickedFrom: (kicked, kicker) => `${kicked} wurde von ${kicker} entfernt`,
+    thanksForJoining: 'Danke fürs Mitmachen!',
+    sessionEndedHost: 'Die Sitzung ist beendet.',
+    sessionEndedParticipant: 'Der Gastgeber hat die Sitzung beendet.',
+    downloadTranscript: 'Protokoll herunterladen',
+    backToHome: 'Zur Startseite',
+    endSession: 'Sitzung beenden',
   },
 
   Russian: {
@@ -169,6 +181,12 @@ export const UI_STRINGS = {
     joinedRoom: (name) => `${name} вошёл(а) в комнату`,
     leftRoom: (name) => `${name} покинул(а) комнату`,
     kickedFrom: (kicked, kicker) => `${kicked} был(а) исключён(а) пользователем ${kicker}`,
+    thanksForJoining: 'Спасибо за участие!',
+    sessionEndedHost: 'Сессия завершена.',
+    sessionEndedParticipant: 'Хозяин завершил сессию.',
+    downloadTranscript: 'Скачать стенограмму',
+    backToHome: 'На главную',
+    endSession: 'Завершить сессию',
   },
 
   Polish: {
@@ -223,6 +241,12 @@ export const UI_STRINGS = {
     joinedRoom: (name) => `${name} dołączył(a) do pokoju`,
     leftRoom: (name) => `${name} opuścił(a) pokój`,
     kickedFrom: (kicked, kicker) => `${kicked} został(a) wyrzucony/a przez ${kicker}`,
+    thanksForJoining: 'Dziękujemy za udział!',
+    sessionEndedHost: 'Sesja została zakończona.',
+    sessionEndedParticipant: 'Gospodarz zakończył sesję.',
+    downloadTranscript: 'Pobierz transkrypt',
+    backToHome: 'Wróć do strony głównej',
+    endSession: 'Zakończ sesję',
   },
   Ukrainian: {
     appTitle: 'BabelChat',
@@ -276,6 +300,12 @@ export const UI_STRINGS = {
     joinedRoom: (name) => `${name} увійшов(ла) до кімнати`,
     leftRoom: (name) => `${name} покинув(ла) кімнату`,
     kickedFrom: (kicked, kicker) => `${kicked} був(ла) видалений(а) користувачем ${kicker}`,
+    thanksForJoining: 'Дякуємо за участь!',
+    sessionEndedHost: 'Сесію завершено.',
+    sessionEndedParticipant: 'Господар завершив сесію.',
+    downloadTranscript: 'Завантажити стенограму',
+    backToHome: 'На головну',
+    endSession: 'Завершити сесію',
   },
 };
 

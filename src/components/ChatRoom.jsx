@@ -495,7 +495,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               onClick={handleEndSessionClick}
               className={`text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${iconBtn}`}
             >
-              End Session
+              {t.endSession}
             </button>
           )}
 
@@ -584,9 +584,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           <div className={`${darkMode ? 'bg-[#1A1A1A]' : 'bg-[#FFFFFF]'} rounded-3xl p-8 w-full max-w-sm shadow-xl flex flex-col items-center gap-4 text-center`}>
             <span className="text-5xl">🙏</span>
             <div>
-              <h2 className={`font-bold text-xl mb-1 ${darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]'}`}>Thanks for joining!</h2>
+              <h2 className={`font-bold text-xl mb-1 ${darkMode ? 'text-[#F5F5F5]' : 'text-[#0A0A0A]'}`}>{t.thanksForJoining}</h2>
               <p className={`text-sm ${darkMode ? 'text-[#888888]' : 'text-[#6B6B6B]'}`}>
-                {isOwner ? 'The session has ended.' : 'The host has ended the session.'}
+                {isOwner ? t.sessionEndedHost : t.sessionEndedParticipant}
               </p>
             </div>
             <button
@@ -598,13 +598,13 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              Download transcript
+              {t.downloadTranscript}
             </button>
             <button
               onClick={onLeave}
               className={`w-full py-3 rounded-2xl text-sm font-semibold transition-colors ${darkMode ? 'bg-[#F5F5F5] text-[#0A0A0A] hover:bg-[#DDDDDD]' : 'bg-[#0A0A0A] text-[#FFFFFF] hover:bg-[#333333]'}`}
             >
-              Back to home
+              {t.backToHome}
             </button>
           </div>
         </div>
