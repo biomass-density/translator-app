@@ -19,7 +19,7 @@ export async function onRequestPost(context) {
     return Response.json({ error: 'GEMINI_API_KEY is not set in Cloudflare environment variables.' }, { status: 500 });
   }
 
-  const prompt = `You are a strict translation API. Return ONLY a valid JSON object mapping language names to translations. No markdown, no explanation, no extra text.
+  const prompt = `You are a strict translation API. Return ONLY a valid JSON object mapping language names to translations. No markdown, no explanation, no extra text. Translate literally and faithfully — do not paraphrase, summarize, or change the meaning. Preserve the exact wording and sentence structure as closely as the target language allows.
 Text: "${text}"
 Target languages: ${targetLanguages.join(', ')}`;
 

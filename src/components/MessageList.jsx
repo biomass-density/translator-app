@@ -85,7 +85,6 @@ export default function MessageList({
   const toggleColor = darkMode ? 'text-[#888888] hover:text-[#F5F5F5]' : 'text-[#666666] hover:text-[#0A0A0A]';
   const systemText = darkMode ? 'text-[#555555]' : 'text-[#AAAAAA]';
   const loadMoreBg = darkMode ? 'bg-[#1A1A1A] text-[#888888] hover:text-[#F5F5F5]' : 'bg-[#EFEFEF] text-[#6B6B6B] hover:text-[#0A0A0A]';
-  const ownTranslatingColor = darkMode ? 'text-[#0A0A0A]/50' : 'text-[#FFFFFF]/60';
   const emptyText = darkMode ? 'text-[#444444]' : 'text-[#CCCCCC]';
   const dateLabelColor = darkMode ? 'text-[#555555]' : 'text-[#BBBBBB]';
 
@@ -210,7 +209,7 @@ export default function MessageList({
                     </button>
                   </div>
                 ) : needsTranslation && !translation ? (
-                  <p className={`italic text-xs ${isOwn ? ownTranslatingColor : originalLabel}`}>{t.translating}</p>
+                  <p className={`italic ${originalLabel}`}>{msg.text}</p>
                 ) : (
                   <p>{msg.text}</p>
                 )}

@@ -236,9 +236,16 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
     missing.forEach(msg => translatingIdsRef.current.add(msg.id));
 
-    // Stagger calls 400ms apart to avoid rate limiting
+    // Stagger calls 400ms apart to avoid rate limiting.
+    // Re-check inside the timeout: the sender's real-time translation may have
+    // arrived while we were waiting, in which case we must not overwrite it.
     missing.forEach((msg, i) => {
       setTimeout(async () => {
+        const already = latestMessagesRef.current.find(m => m.id === msg.id);
+        if (already?.translations?.[userLanguage]) {
+          translatingIdsRef.current.delete(msg.id); // real-time translation won, skip
+          return;
+        }
         try {
           const result = await translateText(msg.text, [userLanguage]);
           const msgRef = doc(db, 'rooms', roomId, 'messages', msg.id);
