@@ -65,42 +65,40 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   const t = getT(userLanguage);
 
-  // Audio queue
-  const audioQueueRef = useRef([]);    // pending blob URLs
-  const currentAudioRef = useRef(null); // currently playing Audio element
+  // Audio queue — one persistent Audio element, reused for every message
+  const audioRef = useRef(null);       // single unlocked Audio element
+  const audioQueueRef = useRef([]);    // pending data: URLs
   const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
 
   function playNext() {
     if (audioQueueRef.current.length === 0) {
       isPlayingRef.current = false;
-      currentAudioRef.current = null;
       return;
     }
+    const audio = audioRef.current;
+    if (!audio) { isPlayingRef.current = false; return; }
+
     const url = audioQueueRef.current.shift();
-    const audio = new Audio(url);
-    currentAudioRef.current = audio;
     isPlayingRef.current = true;
-    audio.onended = () => { URL.revokeObjectURL(url); playNext(); };
+
+    audio.onended = () => playNext();
     audio.onerror = () => {
-      URL.revokeObjectURL(url);
       setTtsError('Audio decode error — invalid audio data');
       playNext();
     };
+
+    // Reuse same element: change src and play — stays unlocked on iOS
+    audio.src = url;
     audio.play().catch(err => {
-      URL.revokeObjectURL(url);
       setTtsError(`${err.name}: ${err.message}`);
       playNext();
     });
   }
 
   function stopAllAudio() {
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current = null;
-    }
-    // Revoke any queued blob URLs to free memory
-    audioQueueRef.current.forEach(url => URL.revokeObjectURL(url));
+    const audio = audioRef.current;
+    if (audio) { audio.pause(); audio.onended = null; audio.onerror = null; audio.src = ''; }
     audioQueueRef.current = [];
     isPlayingRef.current = false;
   }
@@ -119,11 +117,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   function toggleListening() {
     if (!listeningMode) {
-      // Play silent audio on the button click (user gesture) to unlock iOS audio
-      const unlock = new Audio(SILENT_WAV);
-      unlock.play().catch(() => {});
+      // Create Audio element HERE on user gesture — iOS unlocks it permanently
+      const audio = new Audio(SILENT_WAV);
+      audio.play().catch(() => {});
+      audioRef.current = audio;
       setTtsError('');
-      // Mark all currently visible messages as already spoken
       spokenIdsRef.current = new Set(messages.map(m => m.id));
     } else {
       stopAllAudio();
