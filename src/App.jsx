@@ -18,6 +18,16 @@ import { getT } from './constants.js';
 import JoinRoom from './components/JoinRoom.jsx';
 import ChatRoom from './components/ChatRoom.jsx';
 
+/** Delete any number of doc refs, chunked into batches of 450. */
+async function batchDeleteDocs(db, docRefs) {
+  const CHUNK = 450;
+  for (let i = 0; i < docRefs.length; i += CHUNK) {
+    const b = writeBatch(db);
+    docRefs.slice(i, i + CHUNK).forEach(r => b.delete(r));
+    await b.commit();
+  }
+}
+
 const SESSION_KEY = 'babelchat_session';
 const THEME_KEY = 'babelchat_theme';
 const MY_ROOMS_KEY = 'babelchat_my_rooms';
@@ -219,13 +229,13 @@ export default function App() {
 
   async function handleDeleteMyRoom(roomId) {
     try {
-      const batch = writeBatch(db);
+      const refs = [];
       const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
-      msgsSnap.forEach(d => batch.delete(d.ref));
+      msgsSnap.forEach(d => refs.push(d.ref));
       const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
-      partsSnap.forEach(d => batch.delete(d.ref));
-      batch.delete(doc(db, 'rooms', roomId));
-      await batch.commit();
+      partsSnap.forEach(d => refs.push(d.ref));
+      await batchDeleteDocs(db, refs);
+      await deleteDoc(doc(db, 'rooms', roomId));
     } catch (err) {
       console.error('Delete my room error:', err);
     }
@@ -241,13 +251,13 @@ export default function App() {
     const roomIds = Object.keys(myRooms);
     for (const roomId of roomIds) {
       try {
-        const batch = writeBatch(db);
+        const refs = [];
         const msgsSnap = await getDocs(collection(db, 'rooms', roomId, 'messages'));
-        msgsSnap.forEach(d => batch.delete(d.ref));
+        msgsSnap.forEach(d => refs.push(d.ref));
         const partsSnap = await getDocs(collection(db, 'rooms', roomId, 'participants'));
-        partsSnap.forEach(d => batch.delete(d.ref));
-        batch.delete(doc(db, 'rooms', roomId));
-        await batch.commit();
+        partsSnap.forEach(d => refs.push(d.ref));
+        await batchDeleteDocs(db, refs);
+        await deleteDoc(doc(db, 'rooms', roomId));
       } catch (err) {
         console.error('Delete room error for', roomId, ':', err);
       }

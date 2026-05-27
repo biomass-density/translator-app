@@ -8,10 +8,15 @@ export async function onRequestPost(context) {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { text, targetLanguages } = body;
+  const { text, texts, targetLanguages } = body;
 
-  if (!text || !Array.isArray(targetLanguages) || targetLanguages.length === 0) {
-    return Response.json({ translations: {} });
+  // Normalise: single `text` → array of one; `texts` → array as-is
+  const textList = Array.isArray(texts) && texts.length > 0
+    ? texts
+    : (text ? [text] : null);
+
+  if (!textList || !Array.isArray(targetLanguages) || targetLanguages.length === 0) {
+    return Response.json(texts ? { translationSets: [] } : { translations: {} });
   }
 
   const apiKey = env.GEMINI_API_KEY;
@@ -19,8 +24,17 @@ export async function onRequestPost(context) {
     return Response.json({ error: 'GEMINI_API_KEY is not set in Cloudflare environment variables.' }, { status: 500 });
   }
 
-  const prompt = `You are a strict translation API. Return ONLY a valid JSON object mapping language names to translations. No markdown, no explanation, no extra text. Translate literally and faithfully — do not paraphrase, summarize, or change the meaning. Preserve the exact wording and sentence structure as closely as the target language allows.
-Text: "${text}"
+  const isBatch = Array.isArray(texts) && texts.length > 0;
+
+  const prompt = isBatch
+    ? `You are a strict translation API. Return ONLY a valid JSON array — no markdown, no explanation.
+Each element corresponds to one input text (same order and count as the input array).
+Each element is an object mapping language names to their translations.
+Translate literally and faithfully. Preserve exact wording as closely as the target language allows.
+Target languages: ${targetLanguages.join(', ')}
+Input texts (JSON array): ${JSON.stringify(textList)}`
+    : `You are a strict translation API. Return ONLY a valid JSON object mapping language names to translations. No markdown, no explanation, no extra text. Translate literally and faithfully — do not paraphrase, summarize, or change the meaning. Preserve the exact wording and sentence structure as closely as the target language allows.
+Text: "${textList[0]}"
 Target languages: ${targetLanguages.join(', ')}`;
 
   let geminiRes, data;
@@ -39,7 +53,6 @@ Target languages: ${targetLanguages.join(', ')}`;
   }
 
   if (!geminiRes.ok || !data.candidates) {
-    // Pass the real Gemini error back so it's visible in logs
     const geminiError = data?.error?.message || JSON.stringify(data);
     return Response.json({ error: `Gemini API error: ${geminiError}` }, { status: 500 });
   }
@@ -48,7 +61,14 @@ Target languages: ${targetLanguages.join(', ')}`;
   raw = raw.replace(/^```(json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 
   try {
-    return Response.json({ translations: JSON.parse(raw) });
+    const parsed = JSON.parse(raw);
+    if (isBatch) {
+      // Ensure we always return an array of the right length
+      const sets = Array.isArray(parsed) ? parsed : [];
+      return Response.json({ translationSets: sets });
+    } else {
+      return Response.json({ translations: parsed });
+    }
   } catch {
     return Response.json({ error: `Could not parse Gemini response: ${raw}` }, { status: 500 });
   }

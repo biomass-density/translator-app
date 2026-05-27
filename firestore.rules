@@ -21,8 +21,11 @@ service cloud.firestore {
     match /rooms/{roomId}/messages/{msgId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
-      allow update: if request.auth != null
-                    && resource.data.senderId == request.auth.uid;
+      // Own messages: full update. Other messages: only translations/translationFailed fields.
+      allow update: if request.auth != null && (
+        resource.data.senderId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['translations', 'translationFailed'])
+      );
       allow delete: if request.auth != null
                     && get(/databases/$(database)/documents/rooms/$(roomId)).data.createdBy == request.auth.uid;
     }

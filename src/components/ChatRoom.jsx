@@ -11,6 +11,9 @@ import ParticipantsPanel from './ParticipantsPanel.jsx';
 const PAGE_SIZE = 50;
 const SEND_COOLDOWN_MS = 1500;
 
+// Module-level cache so audio survives component re-mounts within the same tab session.
+// Keyed by "text|language|speed". Capped at 60 entries (oldest evicted first).
+const ttsAudioCache = new Map();
 
 async function translateText(text, targetLanguages) {
   const res = await fetch('/api/translate', {
@@ -27,6 +30,8 @@ const TTS_SPEEDS = [0.75, 1, 1.25, 1.5];
 const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.25: '1.25×', 1.5: '1.5×' };
 
 async function fetchTTSAudio(text, language, speed = 1) {
+  const key = `${text}|${language}|${speed}`;
+  if (ttsAudioCache.has(key)) return ttsAudioCache.get(key);
   const res = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -35,7 +40,20 @@ async function fetchTTSAudio(text, language, speed = 1) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'TTS request failed');
   if (!data.audioContent) throw new Error('No audio returned');
-  return data.audioContent; // raw base64 MP3
+  if (ttsAudioCache.size >= 60) ttsAudioCache.delete(ttsAudioCache.keys().next().value);
+  ttsAudioCache.set(key, data.audioContent);
+  return data.audioContent;
+}
+
+async function translateBatch(texts, targetLanguages) {
+  const res = await fetch('/api/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texts, targetLanguages }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Batch translation request failed');
+  return data; // { translationSets: [{ [lang]: "..." }, ...] }
 }
 
 function base64ToArrayBuffer(base64) {
@@ -103,6 +121,26 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       wakeLock?.release();
     };
   }, []);
+
+  // Presence — write isOnline + lastSeen every 30 s; mark offline on tab hide / unmount
+  useEffect(() => {
+    const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
+    const writePresence = (online) =>
+      setDoc(participantRef, { isOnline: online, lastSeen: Date.now() }, { merge: true }).catch(() => {});
+
+    writePresence(true);
+    const heartbeat = setInterval(() => writePresence(true), 30000);
+
+    const handleVisibility = () =>
+      writePresence(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      writePresence(false);
+    };
+  }, [roomId, userId]);
 
   // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
   const audioCtxRef = useRef(null);
@@ -226,8 +264,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   }, [messages, listeningMode]);
 
   // Session history — retroactively translate messages missing our language.
-  // Translations are collected in groups of 5 and written in a single batch,
-  // so we get ceil(N/5) Firestore updates instead of N — far fewer re-renders.
+  // All missing messages are sent to Gemini in ONE call, then written to Firestore
+  // in batches of 450 (just under the writeBatch 500-op limit).
   const translatingIdsRef = useRef(new Set());
   useEffect(() => {
     const missing = messages.filter(msg =>
@@ -242,46 +280,47 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
     missing.forEach(msg => translatingIdsRef.current.add(msg.id));
 
-    const BATCH_SIZE = 5;
-
     (async () => {
-      let pending = []; // { msgId, translations }
+      try {
+        const texts = missing.map(m => m.text);
+        const result = await translateBatch(texts, [userLanguage]);
+        const sets = result.translationSets ?? [];
 
-      const flushBatch = async () => {
-        if (pending.length === 0) return;
-        const toWrite = pending.splice(0); // drain
-        const batch = writeBatch(db);
-        toWrite.forEach(({ msgId, translations }) =>
-          batch.set(doc(db, 'rooms', roomId, 'messages', msgId), { translations }, { merge: true })
-        );
-        await batch.commit().catch(err =>
-          console.error('Batch translation write error:', err.message)
-        );
-      };
+        const BATCH_SIZE = 450;
+        let pending = [];
 
-      for (let i = 0; i < missing.length; i++) {
-        const msg = missing[i];
-        if (i > 0) await new Promise(r => setTimeout(r, 400));
+        const flushBatch = async () => {
+          if (pending.length === 0) return;
+          const toWrite = pending.splice(0);
+          const b = writeBatch(db);
+          toWrite.forEach(({ msgId, translations }) =>
+            b.set(doc(db, 'rooms', roomId, 'messages', msgId), { translations }, { merge: true })
+          );
+          await b.commit().catch(err =>
+            console.error('Batch translation write error:', err.message)
+          );
+        };
 
-        // Skip if real-time translation arrived while we were waiting
-        const already = latestMessagesRef.current.find(m => m.id === msg.id);
-        if (already?.translations?.[userLanguage]) {
-          translatingIdsRef.current.delete(msg.id);
-          continue;
+        for (let i = 0; i < missing.length; i++) {
+          const msg = missing[i];
+          const translations = sets[i] ?? {};
+
+          // Skip if real-time translation arrived while Gemini was running
+          const already = latestMessagesRef.current.find(m => m.id === msg.id);
+          if (already?.translations?.[userLanguage]) {
+            translatingIdsRef.current.delete(msg.id);
+            continue;
+          }
+
+          pending.push({ msgId: msg.id, translations });
+          if (pending.length >= BATCH_SIZE) await flushBatch();
         }
 
-        try {
-          const result = await translateText(msg.text, [userLanguage]);
-          pending.push({ msgId: msg.id, translations: result.translations ?? {} });
-        } catch (err) {
-          console.error('Retroactive translation error:', err.message);
-          translatingIdsRef.current.delete(msg.id);
-        }
-
-        if (pending.length >= BATCH_SIZE) await flushBatch();
+        await flushBatch();
+      } catch (err) {
+        console.error('Retroactive translation error:', err.message);
+        missing.forEach(m => translatingIdsRef.current.delete(m.id));
       }
-
-      await flushBatch(); // write any remainder
     })();
   }, [messages, userLanguage, userId, roomId]);
 

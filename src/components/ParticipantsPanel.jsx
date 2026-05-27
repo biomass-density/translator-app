@@ -50,11 +50,16 @@ export default function ParticipantsPanel({ participants, isOwner, ownerId, curr
         )}
 
         <ul className={`max-h-72 overflow-y-auto divide-y ${divider} px-2`}>
-          {participants.map(p => (
+          {participants.map(p => {
+            const online = p.isOnline === true && p.lastSeen && (Date.now() - p.lastSeen < 90000);
+            return (
             <li key={p.id} className="flex items-center justify-between px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm uppercase ${avatarBg}`}>
-                  {p.name.charAt(0)}
+                <div className="relative flex-shrink-0">
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm uppercase ${avatarBg}`}>
+                    {p.name.charAt(0)}
+                  </div>
+                  <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 ${darkMode ? 'border-[#1A1A1A]' : 'border-[#FFFFFF]'} ${online ? 'bg-green-500' : 'bg-[#555555]'}`} />
                 </div>
                 <div>
                   <div className={`font-medium text-sm flex items-center gap-1.5 ${textPrimary}`}>
@@ -84,7 +89,8 @@ export default function ParticipantsPanel({ participants, isOwner, ownerId, curr
                 </button>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
 
       </div>
