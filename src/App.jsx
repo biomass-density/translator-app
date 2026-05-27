@@ -165,7 +165,6 @@ export default function App() {
       passwordSalt: salt,
       createdBy: userId,
       createdAt: Date.now(),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // auto-delete after 30 days
     });
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
