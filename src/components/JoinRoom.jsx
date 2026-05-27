@@ -32,7 +32,12 @@ export default function JoinRoom({
   const [roomId, setRoomId] = useState(prefilledRoomId || '');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
-  const [language, setLanguage] = useState(LANGUAGES[0].name);
+  const [language, setLanguage] = useState(() => {
+    // Pre-select based on browser locale (e.g. "de-DE" → German, "uk" → Ukrainian)
+    const code = (navigator.language || '').split('-')[0].toLowerCase();
+    const match = LANGUAGES.find(l => l.code === code);
+    return match ? match.name : LANGUAGES[0].name;
+  });
   const [isCreating, setIsCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

@@ -271,6 +271,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // in batches of 450 (just under the writeBatch 500-op limit).
   const translatingIdsRef = useRef(new Set());
   useEffect(() => {
+    // Cap at 30 most-recent to avoid huge Gemini requests on rooms with many missed messages
     const missing = messages.filter(msg =>
       !msg.isSystem &&
       msg.senderId !== userId &&
@@ -278,7 +279,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       !msg.translations?.[userLanguage] &&
       !msg.translationFailed &&
       !translatingIdsRef.current.has(msg.id)
-    );
+    ).slice(-30);
     if (missing.length === 0) return;
 
     missing.forEach(msg => translatingIdsRef.current.add(msg.id));
@@ -610,13 +611,22 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         <div className={`flex-shrink-0 px-4 py-3 border-t ${inputBarBg}`}>
           {sendError && <p className="text-red-500 text-xs mb-2">{sendError}</p>}
           <form onSubmit={handleSend} className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newMessage}
-              onChange={e => setNewMessage(e.target.value)}
-              placeholder={`${t.typeMessage} (${userLanguage})`}
-              className={`flex-1 rounded-full px-5 py-3 text-base focus:outline-none ${inputField}`}
-            />
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={e => setNewMessage(e.target.value)}
+                placeholder={`${t.typeMessage} (${userLanguage})`}
+                maxLength={500}
+                className={`w-full rounded-full px-5 py-3 text-base focus:outline-none ${inputField}`}
+              />
+              {newMessage.length > 400 && (
+                <span className={`absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums pointer-events-none
+                  ${newMessage.length >= 480 ? 'text-red-500' : 'text-orange-400'}`}>
+                  {500 - newMessage.length}
+                </span>
+              )}
+            </div>
             <button
               type="submit"
               disabled={!newMessage.trim() || sendDisabled}

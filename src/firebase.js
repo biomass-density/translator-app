@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,4 +17,15 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// persistentLocalCache stores all Firestore data in IndexedDB so:
+//  - messages load instantly on rejoin (no network round-trip needed)
+//  - the app stays readable during brief connection drops
+//  - writes are queued offline and flushed when connectivity returns
+//  - optimistic sends: onSnapshot fires immediately from the local cache,
+//    so sent messages appear in the UI before the network confirms the write
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(), // safe across multiple browser tabs
+  }),
+});
