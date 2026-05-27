@@ -190,7 +190,7 @@ export default function MessageList({
                     {msg.senderName}
                   </span>
                 )}
-                <div className={`max-w-[75%] px-4 py-2.5 text-sm leading-relaxed transition-all ${bubbleClass}`}>
+                <div className={`max-w-[75%] px-4 py-2.5 text-base leading-relaxed transition-all ${bubbleClass}`}>
                   {isSpeaking && (
                     <div className="flex items-center gap-1 mb-1.5">
                       <span className="flex gap-0.5 items-end" style={{ height: '12px' }}>

@@ -94,6 +94,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const ttsSpeedRef = useRef(1);
   const showEndModalRef = useRef(false);
   const latestMessagesRef = useRef([]);
+  const textareaRef = useRef(null);
 
   const t = getT(userLanguage);
 
@@ -434,12 +435,33 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
+  const handleMessageChange = (e) => {
+    setNewMessage(e.target.value);
+    // Auto-resize textarea
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (newMessage.trim() && !sendDisabled && newMessage.length <= 500) {
+        handleSend(e);
+      }
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     const text = newMessage.trim();
-    if (!text || sendDisabled) return;
+    if (!text || sendDisabled || newMessage.length > 500) return;
     setNewMessage('');
     setSendError('');
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
     setSendDisabled(true);
     setTimeout(() => setSendDisabled(false), SEND_COOLDOWN_MS);
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
@@ -608,28 +630,22 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
       {/* Input bar */}
       {isOwner ? (
-        <div className={`flex-shrink-0 px-4 py-3 border-t ${inputBarBg}`}>
+        <div className={`flex-shrink-0 px-4 pt-3 pb-2 border-t ${inputBarBg}`}>
           {sendError && <p className="text-red-500 text-xs mb-2">{sendError}</p>}
-          <form onSubmit={handleSend} className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={e => setNewMessage(e.target.value)}
-                placeholder={`${t.typeMessage} (${userLanguage})`}
-                maxLength={500}
-                className={`w-full rounded-full px-5 py-3 text-base focus:outline-none ${inputField}`}
-              />
-              {newMessage.length > 400 && (
-                <span className={`absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums pointer-events-none
-                  ${newMessage.length >= 480 ? 'text-red-500' : 'text-orange-400'}`}>
-                  {500 - newMessage.length}
-                </span>
-              )}
-            </div>
+          <form onSubmit={handleSend} className="flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={newMessage}
+              onChange={handleMessageChange}
+              onKeyDown={handleKeyDown}
+              placeholder={`${t.typeMessage} (${userLanguage})`}
+              className={`flex-1 rounded-2xl px-4 py-3 text-base focus:outline-none resize-none overflow-hidden leading-relaxed ${inputField}`}
+              style={{ maxHeight: '120px' }}
+            />
             <button
               type="submit"
-              disabled={!newMessage.trim() || sendDisabled}
+              disabled={!newMessage.trim() || sendDisabled || newMessage.length > 500}
               className={`w-11 h-11 flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors ${sendBtn}`}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -638,6 +654,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
               </svg>
             </button>
           </form>
+          <div className="flex justify-end mt-1 pr-1">
+            <span className={`text-[11px] font-medium tabular-nums transition-colors
+              ${newMessage.length > 500 ? 'text-red-500' : newMessage.length > 400 ? 'text-orange-400' : darkMode ? 'text-[#555555]' : 'text-[#BBBBBB]'}`}>
+              {newMessage.length}/500
+            </span>
+          </div>
         </div>
       ) : (
         <div className={`flex-shrink-0 px-4 py-3 border-t ${inputBarBg}`}>
