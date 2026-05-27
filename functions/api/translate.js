@@ -1,5 +1,11 @@
+import { checkRateLimit } from './_rateLimit.js';
+
 export async function onRequestPost(context) {
   const { request, env } = context;
+
+  if (!(await checkRateLimit(request))) {
+    return Response.json({ error: 'Too many requests — please slow down.' }, { status: 429 });
+  }
 
   let body;
   try {

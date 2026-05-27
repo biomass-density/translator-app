@@ -160,7 +160,13 @@ export default function App() {
 
     if (existingSnap.exists()) throw new Error(t.errorCreating);
 
-    await setDoc(roomRef, { passwordHash: hash, passwordSalt: salt, createdBy: userId, createdAt: Date.now() });
+    await setDoc(roomRef, {
+      passwordHash: hash,
+      passwordSalt: salt,
+      createdBy: userId,
+      createdAt: Date.now(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // auto-delete after 30 days
+    });
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
     await setDoc(participantRef, { name, language, joinedAt: Date.now(), isOnline: true });
