@@ -13,7 +13,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db } from './firebase.js';
-import { hashPassword } from './crypto.js';
+import { hashPassword, generateSalt } from './crypto.js';
 import { getT } from './constants.js';
 import JoinRoom from './components/JoinRoom.jsx';
 import ChatRoom from './components/ChatRoom.jsx';
@@ -111,9 +111,9 @@ export default function App() {
     }
   }
 
-  function saveMyRoom(roomId, password) {
+  function saveMyRoom(roomId) {
     setMyRooms(prev => {
-      const updated = { ...prev, [roomId]: { password, createdAt: Date.now() } };
+      const updated = { ...prev, [roomId]: { createdAt: Date.now() } };
       localStorage.setItem(MY_ROOMS_KEY, JSON.stringify(updated));
       return updated;
     });
@@ -121,13 +121,14 @@ export default function App() {
 
   async function handleJoin({ roomId, name, password, language }) {
     const t = getT(language);
-    const hash = await hashPassword(password);
     const roomRef = doc(db, 'rooms', roomId);
     const roomSnap = await getDoc(roomRef);
 
     if (!roomSnap.exists()) throw new Error(t.roomNotFound);
 
     const roomData = roomSnap.data();
+    const salt = roomData.passwordSalt ?? ''; // '' = backward compat with pre-salt rooms
+    const hash = await hashPassword(password, salt);
     if (roomData.passwordHash !== hash) throw new Error(t.wrongPassword);
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
@@ -152,13 +153,14 @@ export default function App() {
 
   async function handleCreateRoom({ roomId, name, password, language }) {
     const t = getT(language);
-    const hash = await hashPassword(password);
+    const salt = generateSalt();
+    const hash = await hashPassword(password, salt);
     const roomRef = doc(db, 'rooms', roomId);
     const existingSnap = await getDoc(roomRef);
 
     if (existingSnap.exists()) throw new Error(t.errorCreating);
 
-    await setDoc(roomRef, { passwordHash: hash, createdBy: userId, createdAt: Date.now() });
+    await setDoc(roomRef, { passwordHash: hash, passwordSalt: salt, createdBy: userId, createdAt: Date.now() });
 
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
     await setDoc(participantRef, { name, language, joinedAt: Date.now(), isOnline: true });
@@ -171,7 +173,7 @@ export default function App() {
 
     const newSession = { roomId, userName: name, userLanguage: language, isOwner: true };
     localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
-    saveMyRoom(roomId, password);
+    saveMyRoom(roomId);
     setKicked(false);
     setSession(newSession);
     window.history.pushState(null, '', '/' + roomId);

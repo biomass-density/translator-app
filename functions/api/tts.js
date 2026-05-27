@@ -17,6 +17,9 @@ export async function onRequestPost(context) {
   if (!text || !language) {
     return Response.json({ error: 'Missing text or language' }, { status: 400 });
   }
+  if (typeof text !== 'string' || text.length > 500) {
+    return Response.json({ error: 'Text must be a string under 500 characters.' }, { status: 400 });
+  }
   const speakingRate = (typeof speed === 'number' && speed > 0)
     ? Math.min(Math.max(speed, 0.25), 4.0)
     : 1.0;

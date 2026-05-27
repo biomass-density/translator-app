@@ -122,11 +122,14 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     };
   }, []);
 
-  // Presence — write isOnline + lastSeen every 30 s; mark offline on tab hide / unmount
+  // Presence — write isOnline + lastSeen every 30 s; mark offline on tab hide / unmount.
+  // Skip writes after session ends to avoid recreating a zombie participant doc.
   useEffect(() => {
     const participantRef = doc(db, 'rooms', roomId, 'participants', userId);
-    const writePresence = (online) =>
+    const writePresence = (online) => {
+      if (showEndModalRef.current) return; // session ended — don't touch participant doc
       setDoc(participantRef, { isOnline: online, lastSeen: Date.now() }, { merge: true }).catch(() => {});
+    };
 
     writePresence(true);
     const heartbeat = setInterval(() => writePresence(true), 30000);

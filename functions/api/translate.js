@@ -19,6 +19,20 @@ export async function onRequestPost(context) {
     return Response.json(texts ? { translationSets: [] } : { translations: {} });
   }
 
+  const ALLOWED_LANGUAGES = ['English', 'German', 'Russian', 'Polish', 'Ukrainian'];
+  const MAX_TEXT_CHARS = 2000;
+  const MAX_BATCH_TEXTS = 50;
+
+  if (!targetLanguages.every(lang => ALLOWED_LANGUAGES.includes(lang))) {
+    return Response.json({ error: 'Invalid target language.' }, { status: 400 });
+  }
+  if (textList.length > MAX_BATCH_TEXTS) {
+    return Response.json({ error: 'Too many texts in one request.' }, { status: 400 });
+  }
+  if (textList.some(t => typeof t !== 'string' || t.length > MAX_TEXT_CHARS)) {
+    return Response.json({ error: 'One or more texts exceed the 2000-character limit.' }, { status: 400 });
+  }
+
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) {
     return Response.json({ error: 'GEMINI_API_KEY is not set in Cloudflare environment variables.' }, { status: 500 });

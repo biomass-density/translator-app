@@ -65,9 +65,9 @@ export default function JoinRoom({
   const roomItemBg = darkMode ? 'bg-[#272727]' : 'bg-[#F2F2F2]';
   const rejoinColor = darkMode ? 'text-[#888888] hover:text-[#F5F5F5]' : 'text-[#6B6B6B] hover:text-[#0A0A0A]';
 
-  function handleRejoin(rId, rPassword) {
+  function handleRejoin(rId) {
     setRoomId(rId);
-    setPassword(rPassword);
+    setPassword('');
     setIsCreating(false);
   }
 
@@ -79,6 +79,14 @@ export default function JoinRoom({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (roomId.trim().length < 3 || roomId.trim().length > 50) {
+      setError('Room ID must be 3–50 characters.');
+      return;
+    }
+    if (isCreating && password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
     if (!roomId.trim() || !name.trim() || !password.trim()) return;
     setLoading(true);
     try {
@@ -223,7 +231,7 @@ export default function JoinRoom({
                   <div className="flex items-center gap-3 ml-2 flex-shrink-0">
                     <button
                       type="button"
-                      onClick={() => handleRejoin(rId, rData.password)}
+                      onClick={() => handleRejoin(rId)}
                       className={`text-xs font-semibold transition-colors ${rejoinColor}`}
                     >
                       {t.rejoin}
