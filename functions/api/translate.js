@@ -1,5 +1,37 @@
 import { checkRateLimit } from './_rateLimit.js';
 
+// Maps the app's language names to ISO 639-1 codes used by Google Cloud Translation
+const LANGUAGE_CODES = {
+  English:   'en',
+  German:    'de',
+  Russian:   'ru',
+  Polish:    'pl',
+  Ukrainian: 'uk',
+};
+
+const ALLOWED_LANGUAGES = Object.keys(LANGUAGE_CODES);
+const MAX_TEXT_CHARS = 2000;
+const MAX_BATCH_TEXTS = 50;
+
+/**
+ * Calls the Google Cloud Translation API v2.
+ * Supports multiple source texts in one call (all translated to the same target language).
+ * Returns an array of translated strings in the same order as `texts`.
+ */
+async function googleTranslate(texts, targetLangCode, apiKey) {
+  const res = await fetch(
+    `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: texts, target: targetLangCode, format: 'text' }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'Google Translate error');
+  return data.data.translations.map(t => t.translatedText);
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -16,7 +48,7 @@ export async function onRequestPost(context) {
 
   const { text, texts, targetLanguages } = body;
 
-  // Normalise: single `text` → array of one; `texts` → array as-is
+  // Normalise: single `text` → one-element array; `texts` array → as-is
   const textList = Array.isArray(texts) && texts.length > 0
     ? texts
     : (text ? [text] : null);
@@ -24,10 +56,6 @@ export async function onRequestPost(context) {
   if (!textList || !Array.isArray(targetLanguages) || targetLanguages.length === 0) {
     return Response.json(texts ? { translationSets: [] } : { translations: {} });
   }
-
-  const ALLOWED_LANGUAGES = ['English', 'German', 'Russian', 'Polish', 'Ukrainian'];
-  const MAX_TEXT_CHARS = 2000;
-  const MAX_BATCH_TEXTS = 50;
 
   if (!targetLanguages.every(lang => ALLOWED_LANGUAGES.includes(lang))) {
     return Response.json({ error: 'Invalid target language.' }, { status: 400 });
@@ -39,57 +67,37 @@ export async function onRequestPost(context) {
     return Response.json({ error: 'One or more texts exceed the 2000-character limit.' }, { status: 400 });
   }
 
-  const apiKey = env.GEMINI_API_KEY;
+  const apiKey = env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey) {
-    return Response.json({ error: 'GEMINI_API_KEY is not set in Cloudflare environment variables.' }, { status: 500 });
+    return Response.json(
+      { error: 'GOOGLE_TRANSLATE_API_KEY is not set in Cloudflare environment variables.' },
+      { status: 500 }
+    );
   }
 
   const isBatch = Array.isArray(texts) && texts.length > 0;
 
-  const prompt = isBatch
-    ? `You are a strict translation API. Return ONLY a valid JSON array — no markdown, no explanation.
-Each element corresponds to one input text (same order and count as the input array).
-Each element is an object mapping language names to their translations.
-Translate literally and faithfully. Preserve exact wording as closely as the target language allows.
-Target languages: ${targetLanguages.join(', ')}
-Input texts (JSON array): ${JSON.stringify(textList)}`
-    : `You are a strict translation API. Return ONLY a valid JSON object mapping language names to translations. No markdown, no explanation, no extra text. Translate literally and faithfully — do not paraphrase, summarize, or change the meaning. Preserve the exact wording and sentence structure as closely as the target language allows.
-Text: "${textList[0]}"
-Target languages: ${targetLanguages.join(', ')}`;
-
-  let geminiRes, data;
   try {
-    geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
-    );
-    data = await geminiRes.json();
-  } catch (err) {
-    return Response.json({ error: `Network error calling Gemini: ${err.message}` }, { status: 500 });
-  }
-
-  if (!geminiRes.ok || !data.candidates) {
-    const geminiError = data?.error?.message || JSON.stringify(data);
-    return Response.json({ error: `Gemini API error: ${geminiError}` }, { status: 500 });
-  }
-
-  let raw = data.candidates[0].content.parts[0].text.trim();
-  raw = raw.replace(/^```(json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-
-  try {
-    const parsed = JSON.parse(raw);
     if (isBatch) {
-      // Ensure we always return an array of the right length
-      const sets = Array.isArray(parsed) ? parsed : [];
-      return Response.json({ translationSets: sets });
+      // Retroactive translation: many texts → one language.
+      // Google Translate accepts multiple `q` values in a single API call — fast.
+      const langCode = LANGUAGE_CODES[targetLanguages[0]];
+      const translated = await googleTranslate(textList, langCode, apiKey);
+      const translationSets = translated.map(t => ({ [targetLanguages[0]]: t }));
+      return Response.json({ translationSets });
     } else {
-      return Response.json({ translations: parsed });
+      // Real-time translation: one text → multiple languages.
+      // Fire one API call per language in parallel — still fast (~150ms each).
+      const results = await Promise.all(
+        targetLanguages.map(async lang => {
+          const langCode = LANGUAGE_CODES[lang];
+          const [translated] = await googleTranslate(textList, langCode, apiKey);
+          return [lang, translated];
+        })
+      );
+      return Response.json({ translations: Object.fromEntries(results) });
     }
-  } catch {
-    return Response.json({ error: `Could not parse Gemini response: ${raw}` }, { status: 500 });
+  } catch (err) {
+    return Response.json({ error: err.message }, { status: 500 });
   }
 }
