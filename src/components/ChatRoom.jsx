@@ -107,19 +107,33 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     return () => { window.removeEventListener('online', setOn); window.removeEventListener('offline', setOff); };
   }, []);
 
-  // Screen wake lock — keeps display on while in a room
+  // Screen wake lock — keeps display on while in a room.
+  // The browser can release the lock at any time (battery saver, tab hidden,
+  // system pressure), so re-acquire on release, on tab return, and on any tap.
   useEffect(() => {
+    if (!('wakeLock' in navigator)) return;
     let wakeLock = null;
+    let active = true;
     const request = async () => {
-      if (!('wakeLock' in navigator)) return;
-      try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+      if (!active || wakeLock || document.visibilityState !== 'visible') return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+          wakeLock = null;
+          if (active && document.visibilityState === 'visible') request();
+        });
+      } catch (_) { wakeLock = null; }
     };
     const handleVisibility = () => { if (document.visibilityState === 'visible') request(); };
     request();
     document.addEventListener('visibilitychange', handleVisibility);
+    document.addEventListener('pointerdown', request);
     return () => {
+      active = false;
       document.removeEventListener('visibilitychange', handleVisibility);
-      wakeLock?.release();
+      document.removeEventListener('pointerdown', request);
+      wakeLock?.release().catch(() => {});
+      wakeLock = null;
     };
   }, []);
 
@@ -374,6 +388,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       if (!initial && data.sessionEnded && !showEndModalRef.current) {
         showEndModalRef.current = true;
         stopAllAudio();
+        // Grab the full history right away — our participant doc (and with it
+        // read permission) is about to be deleted by the host's kick batch.
+        fetchFullHistory();
         setShowEndModal(true);
       }
     }, (err) => console.error('Room watch error:', err));
@@ -489,14 +506,31 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }
   };
 
+  // Fetch the ENTIRE message history (not just the paginated view) into
+  // latestMessagesRef so the transcript export is complete. Best-effort:
+  // after the session ends, participant docs are deleted and Firestore rules
+  // deny reads — so this must run while we still have permission, and on
+  // failure we keep whatever pages are already loaded.
+  async function fetchFullHistory() {
+    try {
+      const msgsRef = collection(db, 'rooms', roomId, 'messages');
+      const snap = await getDocs(query(msgsRef, orderBy('timestamp', 'asc')));
+      if (!snap.empty) {
+        latestMessagesRef.current = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      }
+    } catch (_) { /* keep the partial list already in the ref */ }
+  }
+
   async function handleEndSessionClick() {
     showEndModalRef.current = true;
     stopAllAudio();
+    await fetchFullHistory(); // grab everything while we still have read access
     await onEndSession(); // marks sessionEnded, kicks participants, clears localStorage session
     setShowEndModal(true);
   }
 
-  function exportTranscript() {
+  async function exportTranscript() {
+    await fetchFullHistory(); // no-op fallback if permissions are already gone
     const lines = [];
 
     for (const msg of latestMessagesRef.current) {
