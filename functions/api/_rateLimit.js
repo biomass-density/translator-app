@@ -7,24 +7,35 @@
  * Writes are not atomic, so the actual limit may be slightly exceeded
  * under burst traffic — that is acceptable for a soft cost-protection guard.
  *
- * Limits: MAX_REQUESTS per WINDOW_MS per IP per PoP.
+ * IMPORTANT: budgets are scoped per endpoint. A group using this app is
+ * typically in one room on one WiFi network, so every participant shares a
+ * single public IP. Listening mode makes one TTS call per participant per
+ * message, so a shared budget across endpoints would let listeners starve
+ * the sender's translation calls — which surfaces as messages being read
+ * aloud untranslated. Keep TTS well above translate for that reason.
  */
 
-const WINDOW_MS = 60_000;   // 1-minute sliding window
-const MAX_REQUESTS = 30;    // requests allowed per window
+const WINDOW_MS = 60_000;   // 1-minute window
 
-export async function checkRateLimit(request) {
+export const RATE_LIMITS = {
+  translate: 120,  // senders + retroactive batches
+  tts:       300,  // one call per listener per message — scales with room size
+};
+
+export async function checkRateLimit(request, scope = 'default') {
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
   const window = Math.floor(Date.now() / WINDOW_MS);
-  // Use a synthetic URL as the cache key (never actually fetched)
-  const cacheKey = new Request(`https://babelchat-rate-limit/${ip}/${window}`);
+  const max = RATE_LIMITS[scope] ?? 60;
+  // Use a synthetic URL as the cache key (never actually fetched).
+  // Scope is part of the key so endpoints get independent budgets.
+  const cacheKey = new Request(`https://babelchat-rate-limit/${scope}/${ip}/${window}`);
 
   try {
     const cache = caches.default;
     const cached = await cache.match(cacheKey);
     const count = cached ? parseInt(await cached.text(), 10) : 0;
 
-    if (count >= MAX_REQUESTS) return false; // blocked
+    if (count >= max) return false; // blocked
 
     // Increment — not atomic but good enough for soft limiting
     await cache.put(

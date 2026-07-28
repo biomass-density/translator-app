@@ -18,7 +18,7 @@ const MAX_BATCH_TEXTS = 50;
  * Supports multiple source texts in one call (all translated to the same target language).
  * Returns an array of translated strings in the same order as `texts`.
  */
-async function googleTranslate(texts, targetLangCode, apiKey) {
+async function googleTranslate(texts, targetLangCode, apiKey, attempt = 0) {
   const res = await fetch(
     `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`,
     {
@@ -28,14 +28,25 @@ async function googleTranslate(texts, targetLangCode, apiKey) {
     }
   );
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || 'Google Translate error');
+  if (!res.ok) {
+    // Retry transient failures (rate limits, upstream 5xx). A permanently
+    // "failed" translation is what makes a message get read aloud in the
+    // listener's voice but the sender's language, so it is worth retrying
+    // here rather than surfacing the first blip as a hard failure.
+    const transient = res.status === 429 || res.status >= 500;
+    if (transient && attempt < 2) {
+      await new Promise(r => setTimeout(r, 250 * 2 ** attempt));
+      return googleTranslate(texts, targetLangCode, apiKey, attempt + 1);
+    }
+    throw new Error(data.error?.message || 'Google Translate error');
+  }
   return data.data.translations.map(t => t.translatedText);
 }
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  if (!(await checkRateLimit(request))) {
+  if (!(await checkRateLimit(request, 'translate'))) {
     return Response.json({ error: 'Too many requests — please slow down.' }, { status: 429 });
   }
 

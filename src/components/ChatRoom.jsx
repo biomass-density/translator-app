@@ -15,21 +15,32 @@ const SEND_COOLDOWN_MS = 1500;
 // Keyed by "text|language|speed". Capped at 60 entries (oldest evicted first).
 const ttsAudioCache = new Map();
 
-async function translateText(text, targetLanguages) {
+async function translateText(text, targetLanguages, attempt = 0) {
   const res = await fetch('/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, targetLanguages }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Translation request failed');
+  if (!res.ok) {
+    // Retry rate limits / server errors — a message left permanently
+    // untranslated gets spoken in the wrong language for listeners.
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise(r => setTimeout(r, 400 * 2 ** attempt));
+      return translateText(text, targetLanguages, attempt + 1);
+    }
+    throw new Error(data.error || 'Translation request failed');
+  }
   return data;
 }
 
 const TTS_SPEEDS = [0.75, 1, 1.25, 1.5];
 const TTS_SPEED_LABELS = { 0.75: '0.75×', 1: '1×', 1.25: '1.25×', 1.5: '1.5×' };
 
-async function fetchTTSAudio(text, language, speed = 1) {
+// Returns an ordered array of base64 MP3 segments. Long text is split
+// server-side on sentence boundaries, so a single message can come back as
+// several segments that must be played back-to-back in order.
+async function fetchTTSAudio(text, language, speed = 1, attempt = 0) {
   const key = `${text}|${language}|${speed}`;
   if (ttsAudioCache.has(key)) return ttsAudioCache.get(key);
   const res = await fetch('/api/tts', {
@@ -38,11 +49,20 @@ async function fetchTTSAudio(text, language, speed = 1) {
     body: JSON.stringify({ text, language, speed }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'TTS request failed');
-  if (!data.audioContent) throw new Error('No audio returned');
+  if (!res.ok) {
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise(r => setTimeout(r, 400 * 2 ** attempt));
+      return fetchTTSAudio(text, language, speed, attempt + 1);
+    }
+    throw new Error(data.error || 'TTS request failed');
+  }
+  const segments = Array.isArray(data.audioSegments) && data.audioSegments.length > 0
+    ? data.audioSegments
+    : (data.audioContent ? [data.audioContent] : []);
+  if (segments.length === 0) throw new Error('No audio returned');
   if (ttsAudioCache.size >= 60) ttsAudioCache.delete(ttsAudioCache.keys().next().value);
-  ttsAudioCache.set(key, data.audioContent);
-  return data.audioContent;
+  ttsAudioCache.set(key, segments);
+  return segments;
 }
 
 async function translateBatch(texts, targetLanguages) {
@@ -163,44 +183,92 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
   const audioCtxRef = useRef(null);
   const currentSourceRef = useRef(null);
-  const audioQueueRef = useRef([]);   // queue of { base64, msgId, text }
+  // Queue of { status: 'pending'|'ready'|'failed', segments, msgId, text, language }.
+  // Slots are reserved synchronously when a message arrives so playback order
+  // always matches message order, even though fetches finish out of order
+  // (a cache hit resolves far sooner than a network round-trip).
+  const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const spokenIdsRef = useRef(new Set());
-  const currentItemRef = useRef(null); // { text, msgId } of currently-playing item
+  const currentItemRef = useRef(null); // currently-playing queue item
+  const playGenerationRef = useRef(0); // bumped by stopAllAudio to cancel in-flight chains
 
   async function playNext() {
-    if (audioQueueRef.current.length === 0) {
+    const queue = audioQueueRef.current;
+    // Drop items whose audio never arrived
+    while (queue.length > 0 && queue[0].status === 'failed') queue.shift();
+
+    if (queue.length === 0) {
       isPlayingRef.current = false;
+      currentItemRef.current = null;
       setSpeakingMsgId(null);
       setQueueLength(0);
       return;
     }
+    // Head of queue is still downloading — hold the slot rather than skipping
+    // ahead, and let fetchAndEnqueue restart playback when it lands.
+    if (queue[0].status === 'pending') {
+      isPlayingRef.current = false;
+      currentItemRef.current = null;
+      setSpeakingMsgId(null);
+      setQueueLength(queue.length);
+      return;
+    }
+
     const ctx = audioCtxRef.current;
     if (!ctx) { isPlayingRef.current = false; return; }
 
-    const { base64, msgId, text } = audioQueueRef.current.shift();
-    currentItemRef.current = { text, msgId };
-    setQueueLength(audioQueueRef.current.length);
+    const item = queue.shift();
+    currentItemRef.current = item;
+    setQueueLength(queue.length);
     isPlayingRef.current = true;
-    setSpeakingMsgId(msgId);
+    setSpeakingMsgId(item.msgId);
+    playSegment(item, 0, playGenerationRef.current);
+  }
+
+  // Plays one message's segments back-to-back. A long message is synthesized
+  // as several MP3 chunks; playing only the first is what made long sentences
+  // sound like they were missing words.
+  async function playSegment(item, index, generation) {
+    const ctx = audioCtxRef.current;
+    if (!ctx || generation !== playGenerationRef.current) return;
+
+    if (index >= item.segments.length) {
+      currentItemRef.current = null;
+      playNext();
+      return;
+    }
 
     try {
-      const arrayBuffer = base64ToArrayBuffer(base64);
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      // Mobile browsers suspend the context when the screen dims; resuming
+      // before each segment stops playback from stalling mid-message.
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (generation !== playGenerationRef.current) return;
+
+      const audioBuffer = await ctx.decodeAudioData(base64ToArrayBuffer(item.segments[index]));
+      if (generation !== playGenerationRef.current) return;
+
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
       currentSourceRef.current = source;
-      source.onended = () => { currentSourceRef.current = null; currentItemRef.current = null; playNext(); };
+      source.onended = () => {
+        if (generation !== playGenerationRef.current) return;
+        currentSourceRef.current = null;
+        playSegment(item, index + 1, generation);
+      };
       source.start(0);
     } catch (err) {
+      if (generation !== playGenerationRef.current) return;
       setTtsError(`Audio error: ${err.message}`);
+      currentItemRef.current = null;
       setSpeakingMsgId(null);
       playNext();
     }
   }
 
   function stopAllAudio() {
+    playGenerationRef.current += 1; // cancels any in-flight segment chain
     try { currentSourceRef.current?.stop(); } catch (_) {}
     currentSourceRef.current = null;
     currentItemRef.current = null;
@@ -210,17 +278,24 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     setQueueLength(0);
   }
 
-  async function fetchAndEnqueue(text, msgId) {
+  async function fetchAndEnqueue(text, msgId, language = userLanguage) {
+    // Reserve the slot before awaiting so queue order matches message order
+    const item = { status: 'pending', segments: null, msgId, text, language };
+    audioQueueRef.current.push(item);
+    setQueueLength(audioQueueRef.current.length);
+
     try {
-      const base64 = await fetchTTSAudio(text, userLanguage, ttsSpeedRef.current);
+      const segments = await fetchTTSAudio(text, language, ttsSpeedRef.current);
+      if (!audioQueueRef.current.includes(item)) return; // stopped while fetching
+      item.segments = segments;
+      item.status = 'ready';
       setTtsError('');
-      audioQueueRef.current.push({ base64, msgId, text });
-      setQueueLength(audioQueueRef.current.length + (isPlayingRef.current ? 1 : 0));
-      if (!isPlayingRef.current) playNext();
     } catch (err) {
       console.error('TTS error:', err.message);
+      item.status = 'failed';
       setTtsError(err.message);
     }
+    if (!isPlayingRef.current) playNext();
   }
 
   function toggleListening() {
@@ -247,9 +322,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       ttsSpeedRef.current = next;
       // Stop current audio and re-fetch at new speed — avoids chipmunk pitch shift
       if (isPlayingRef.current && currentItemRef.current) {
-        const { text, msgId } = currentItemRef.current;
+        const { text, msgId, language } = currentItemRef.current;
         stopAllAudio();
-        fetchAndEnqueue(text, msgId);
+        fetchAndEnqueue(text, msgId, language);
       }
       return next;
     });
@@ -264,6 +339,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   }
 
   // Watch messages — speak new ones when listening mode is on
+  const ttsRetriedIdsRef = useRef(new Set());
   useEffect(() => {
     if (!listeningMode) return;
     for (const msg of messages) {
@@ -274,10 +350,30 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       }
       const needsTranslation = msg.originalLanguage !== userLanguage;
       const translation = msg.translations?.[userLanguage];
+
+      // Still translating — leave it unspoken; a later snapshot will pick it up
       if (needsTranslation && !translation && !msg.translationFailed) continue;
-      const text = needsTranslation && translation ? translation : msg.text;
+
+      if (needsTranslation && !translation && msg.translationFailed) {
+        // Give a failed translation one more chance before falling back. A
+        // transient failure would otherwise leave the message permanently
+        // untranslated for this listener.
+        if (!ttsRetriedIdsRef.current.has(msg.id)) {
+          ttsRetriedIdsRef.current.add(msg.id);
+          retryTranslation(msg).catch(() => {});
+          continue; // not marked spoken — re-evaluated once the retry resolves
+        }
+        // Retry failed too. Speak the original text in the ORIGINAL language's
+        // voice: reading e.g. English aloud with a Russian voice produces
+        // English words in a Russian accent, which is worse than useless.
+        spokenIdsRef.current.add(msg.id);
+        fetchAndEnqueue(msg.text, msg.id, msg.originalLanguage);
+        continue;
+      }
+
+      const text = needsTranslation ? translation : msg.text;
       spokenIdsRef.current.add(msg.id);
-      fetchAndEnqueue(text, msg.id);
+      fetchAndEnqueue(text, msg.id, userLanguage);
     }
   }, [messages, listeningMode]);
 
