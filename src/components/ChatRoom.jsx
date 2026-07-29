@@ -546,6 +546,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
         const BATCH_SIZE = 450;
         let pending = [];
+        const written = [];
 
         const flushBatch = async () => {
           if (pending.length === 0) return;
@@ -554,9 +555,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           toWrite.forEach(({ msgId, translations }) =>
             b.set(doc(db, 'rooms', roomId, 'messages', msgId), { translations }, { merge: true })
           );
-          await b.commit().catch(err =>
-            console.error('Batch translation write error:', err.message)
-          );
+          await b.commit()
+            .then(() => written.push(...toWrite))
+            .catch(err => console.error('Batch translation write error:', err.message));
         };
 
         for (let i = 0; i < missing.length; i++) {
@@ -575,6 +576,20 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         }
 
         await flushBatch();
+
+        // Show the translations straight away. The live listener only covers
+        // the newest PAGE_SIZE messages, so for anything pulled in with
+        // "Load earlier" the Firestore write never comes back through a
+        // snapshot — without this the reader would keep seeing the original
+        // language even though the translation had been stored successfully.
+        if (written.length > 0) {
+          const byId = new Map(written.map(w => [w.msgId, w.translations]));
+          const merge = (m) => byId.has(m.id)
+            ? { ...m, translations: { ...(m.translations ?? {}), ...byId.get(m.id) } }
+            : m;
+          olderMessagesRef.current = olderMessagesRef.current.map(merge);
+          setMessages(prev => prev.map(merge));
+        }
       } catch (err) {
         console.error('Retroactive translation error:', err.message);
         missing.forEach(m => translatingIdsRef.current.delete(m.id));
