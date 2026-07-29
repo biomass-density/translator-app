@@ -9,7 +9,10 @@ import MessageList from './MessageList.jsx';
 import ParticipantsPanel from './ParticipantsPanel.jsx';
 
 const PAGE_SIZE = 50;
-const SEND_COOLDOWN_MS = 1500;
+// Short enough not to fight a fast typist sending several lines in a row,
+// long enough to swallow a double-fire from a held Enter key. The real
+// abuse protection is the server-side rate limiter, not this.
+const SEND_COOLDOWN_MS = 300;
 
 // Module-level cache so audio survives component re-mounts within the same tab session.
 // Keyed by "text|language|speed". Capped at 60 entries (oldest evicted first).
@@ -205,9 +208,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       setQueueLength(0);
       return;
     }
-    // Head of queue is still downloading — hold the slot rather than skipping
-    // ahead, and let fetchAndEnqueue restart playback when it lands.
-    if (queue[0].status === 'pending') {
+    // Head of queue is still waiting on a translation or its audio — hold the
+    // slot rather than skipping ahead, so nothing is spoken out of order.
+    // Playback restarts when the slot resolves.
+    if (queue[0].status === 'awaiting' || queue[0].status === 'pending') {
       isPlayingRef.current = false;
       currentItemRef.current = null;
       setSpeakingMsgId(null);
@@ -278,15 +282,93 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     setQueueLength(0);
   }
 
-  async function fetchAndEnqueue(text, msgId, language = userLanguage) {
-    // Reserve the slot before awaiting so queue order matches message order
-    const item = { status: 'pending', segments: null, msgId, text, language };
-    audioQueueRef.current.push(item);
-    setQueueLength(audioQueueRef.current.length);
+  // How long to wait for a translation before speaking the original instead.
+  // Ordering is preserved by making the queue wait, so this only bounds how
+  // long one stuck message can hold up the ones behind it.
+  const TRANSLATION_WAIT_MS = 12000;
+
+  // Decides what each reserved-but-unresolved slot should actually say.
+  // Called on every snapshot and once a second, so slots resolve as soon as
+  // their translation lands without ever changing their position in the queue.
+  function resolveAwaitingSlots(msgList) {
+    let changed = false;
+    for (const item of audioQueueRef.current) {
+      if (item.status !== 'awaiting') continue;
+
+      // Sender's language matches ours — no translation involved at all.
+      // (This is the English-speaker-listening-to-English case.)
+      if (item.originalLanguage === userLanguage) {
+        startSpeechFetch(item, item.originalText, userLanguage);
+        changed = true;
+        continue;
+      }
+
+      const msg = msgList?.find(m => m.id === item.msgId);
+      const translation = msg?.translations?.[userLanguage];
+      if (translation) {
+        startSpeechFetch(item, translation, userLanguage);
+        changed = true;
+        continue;
+      }
+
+      if (msg?.translationFailed) {
+        // Give a failed translation one more chance before falling back — a
+        // transient failure would otherwise leave it permanently untranslated.
+        if (!ttsRetriedIdsRef.current.has(item.msgId)) {
+          ttsRetriedIdsRef.current.add(item.msgId);
+          retryTranslation(msg).catch(() => {});
+          continue; // stays in place, keeping its turn in the queue
+        }
+        // Retry failed too. Speak the original in the ORIGINAL language's
+        // voice: reading English aloud with a Russian voice produces English
+        // words in a Russian accent, which is worse than useless.
+        startSpeechFetch(item, item.originalText, item.originalLanguage);
+        changed = true;
+        continue;
+      }
+
+      // Still translating. Wait — but not forever.
+      if (Date.now() - item.reservedAt > TRANSLATION_WAIT_MS) {
+        startSpeechFetch(item, item.originalText, item.originalLanguage);
+        changed = true;
+      }
+    }
+    if (changed && !isPlayingRef.current) playNext();
+  }
+
+  // Moves a slot from 'awaiting' to 'pending', fetches its audio, then marks it
+  // ready. The slot never moves position, so playback order is always message
+  // order regardless of which fetch finishes first.
+  async function startSpeechFetch(item, text, language) {
+    item.status = 'pending';
+    item.text = text;
+    item.language = language;
 
     try {
       const segments = await fetchTTSAudio(text, language, ttsSpeedRef.current);
       if (!audioQueueRef.current.includes(item)) return; // stopped while fetching
+      item.segments = segments;
+      item.status = 'ready';
+      setTtsError('');
+    } catch (err) {
+      console.error('TTS error:', err.message);
+      item.status = 'failed';
+      setTtsError(err.message);
+    }
+    if (!isPlayingRef.current) playNext();
+  }
+
+  // Used by the speed toggle to re-speak the current message at a new rate.
+  async function fetchAndEnqueue(text, msgId, language = userLanguage) {
+    const item = {
+      status: 'pending', segments: null, msgId, text, language,
+      originalText: text, originalLanguage: language, reservedAt: Date.now(),
+    };
+    audioQueueRef.current.push(item);
+    setQueueLength(audioQueueRef.current.length);
+    try {
+      const segments = await fetchTTSAudio(text, language, ttsSpeedRef.current);
+      if (!audioQueueRef.current.includes(item)) return;
       item.segments = segments;
       item.status = 'ready';
       setTtsError('');
@@ -338,44 +420,43 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     }).catch(() => {});
   }
 
-  // Watch messages — speak new ones when listening mode is on
+  // Watch messages — speak new ones when listening mode is on.
+  //
+  // A slot is reserved for every new message the moment it is seen, BEFORE its
+  // translation exists. Waiting for the translation before queueing would let a
+  // fast-translating message overtake a slow one and be spoken out of order —
+  // which is very easy to hit when several messages are sent in quick
+  // succession, or when one translation retries after a transient failure.
   const ttsRetriedIdsRef = useRef(new Set());
   useEffect(() => {
     if (!listeningMode) return;
     for (const msg of messages) {
       if (spokenIdsRef.current.has(msg.id)) continue;
-      if (msg.isSystem || msg.senderId === userId) {
-        spokenIdsRef.current.add(msg.id);
-        continue;
-      }
-      const needsTranslation = msg.originalLanguage !== userLanguage;
-      const translation = msg.translations?.[userLanguage];
-
-      // Still translating — leave it unspoken; a later snapshot will pick it up
-      if (needsTranslation && !translation && !msg.translationFailed) continue;
-
-      if (needsTranslation && !translation && msg.translationFailed) {
-        // Give a failed translation one more chance before falling back. A
-        // transient failure would otherwise leave the message permanently
-        // untranslated for this listener.
-        if (!ttsRetriedIdsRef.current.has(msg.id)) {
-          ttsRetriedIdsRef.current.add(msg.id);
-          retryTranslation(msg).catch(() => {});
-          continue; // not marked spoken — re-evaluated once the retry resolves
-        }
-        // Retry failed too. Speak the original text in the ORIGINAL language's
-        // voice: reading e.g. English aloud with a Russian voice produces
-        // English words in a Russian accent, which is worse than useless.
-        spokenIdsRef.current.add(msg.id);
-        fetchAndEnqueue(msg.text, msg.id, msg.originalLanguage);
-        continue;
-      }
-
-      const text = needsTranslation ? translation : msg.text;
       spokenIdsRef.current.add(msg.id);
-      fetchAndEnqueue(text, msg.id, userLanguage);
+      if (msg.isSystem || msg.senderId === userId) continue;
+
+      audioQueueRef.current.push({
+        status: 'awaiting',           // waiting for a translation to exist
+        msgId: msg.id,
+        text: null,
+        language: null,
+        segments: null,
+        originalText: msg.text,
+        originalLanguage: msg.originalLanguage,
+        reservedAt: Date.now(),
+      });
+      setQueueLength(audioQueueRef.current.length);
     }
-  }, [messages, listeningMode]);
+    resolveAwaitingSlots(messages);
+  }, [messages, listeningMode, userLanguage]);
+
+  // Awaiting slots are also re-checked on a timer so the fallback deadline
+  // still fires when no new Firestore snapshot arrives to drive it.
+  useEffect(() => {
+    if (!listeningMode) return;
+    const id = setInterval(() => resolveAwaitingSlots(latestMessagesRef.current), 1000);
+    return () => clearInterval(id);
+  }, [listeningMode, userLanguage]);
 
   // Session history — retroactively translate messages missing our language.
   // All missing messages are sent to Gemini in ONE call, then written to Firestore
@@ -599,6 +680,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     } catch (err) {
       console.error('Send error:', err);
       setSendError(t.errorSending);
+      // Put the text back rather than losing it — the input was cleared
+      // optimistically before the write was known to have succeeded.
+      setNewMessage(prev => (prev ? prev : text));
     }
   };
 
