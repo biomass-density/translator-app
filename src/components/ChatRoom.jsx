@@ -198,7 +198,9 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   async function playNext() {
     const queue = audioQueueRef.current;
-    // Drop items whose audio never arrived
+    // 'failed' is terminal — only reached after every retry and the
+    // original-language fallback have been exhausted, and the listener has
+    // been told. Everything else keeps its place in the queue.
     while (queue.length > 0 && queue[0].status === 'failed') queue.shift();
 
     if (queue.length === 0) {
@@ -208,10 +210,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       setQueueLength(0);
       return;
     }
-    // Head of queue is still waiting on a translation or its audio — hold the
-    // slot rather than skipping ahead, so nothing is spoken out of order.
-    // Playback restarts when the slot resolves.
-    if (queue[0].status === 'awaiting' || queue[0].status === 'pending') {
+    // Head of queue is still waiting on a translation, its audio, or a retry —
+    // hold the slot rather than skipping ahead, so nothing is spoken out of
+    // order or dropped. Playback restarts when the slot resolves.
+    if (queue[0].status === 'awaiting' || queue[0].status === 'pending' || queue[0].status === 'retrying') {
       isPlayingRef.current = false;
       currentItemRef.current = null;
       setSpeakingMsgId(null);
@@ -282,17 +284,31 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     setQueueLength(0);
   }
 
-  // How long to wait for a translation before speaking the original instead.
-  // Ordering is preserved by making the queue wait, so this only bounds how
-  // long one stuck message can hold up the ones behind it.
-  const TRANSLATION_WAIT_MS = 12000;
+  // Nothing is ever dropped for being slow. A message only stops being retried
+  // once it has genuinely exhausted every option, and even then it falls back
+  // to audio in the sender's own language rather than going unspoken.
+  const TRANSLATION_RETRY_BASE_MS = 2000;  // backoff between translation retries
+  const TRANSLATION_FALLBACK_MS = 60000;   // then read the original aloud instead
+  const TTS_RETRY_BASE_MS = 1000;          // backoff between audio retries
+  const MAX_TTS_ATTEMPTS = 10;             // ~2 min of retrying before fallback
 
-  // Decides what each reserved-but-unresolved slot should actually say.
-  // Called on every snapshot and once a second, so slots resolve as soon as
-  // their translation lands without ever changing their position in the queue.
+  // Jittered so that every listener in a room does not retry a shared stuck
+  // translation in lockstep and stampede the API into rate-limiting itself.
+  const backoff = (base, attempt, cap = 20000) =>
+    Math.min(base * 2 ** attempt, cap) * (0.75 + Math.random() * 0.5);
+
+  // Drives every unresolved slot forward. Runs on each snapshot and once a
+  // second, so slots resolve and retry in place without ever changing position.
   function resolveAwaitingSlots(msgList) {
+    const now = Date.now();
     let changed = false;
+
     for (const item of audioQueueRef.current) {
+      // Audio fetch failed earlier — retry it when its backoff expires.
+      if (item.status === 'retrying') {
+        if (now >= item.nextAttemptAt) startSpeechFetch(item, item.text, item.language);
+        continue;
+      }
       if (item.status !== 'awaiting') continue;
 
       // Sender's language matches ours — no translation involved at all.
@@ -311,38 +327,39 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         continue;
       }
 
-      if (msg?.translationFailed) {
-        // Give a failed translation one more chance before falling back — a
-        // transient failure would otherwise leave it permanently untranslated.
-        if (!ttsRetriedIdsRef.current.has(item.msgId)) {
-          ttsRetriedIdsRef.current.add(item.msgId);
-          retryTranslation(msg).catch(() => {});
-          continue; // stays in place, keeping its turn in the queue
-        }
-        // Retry failed too. Speak the original in the ORIGINAL language's
-        // voice: reading English aloud with a Russian voice produces English
-        // words in a Russian accent, which is worse than useless.
-        startSpeechFetch(item, item.originalText, item.originalLanguage);
-        changed = true;
-        continue;
+      const waited = now - item.reservedAt;
+
+      // Translation is marked failed — keep retrying it on a backoff rather
+      // than accepting the failure. Most failures are transient (rate limit,
+      // network blip) and succeed on a later attempt.
+      if (msg?.translationFailed && now >= (item.nextTranslationRetryAt ?? 0)) {
+        item.translationAttempts = (item.translationAttempts ?? 0) + 1;
+        item.nextTranslationRetryAt =
+          now + backoff(TRANSLATION_RETRY_BASE_MS, item.translationAttempts);
+        retryTranslation(msg).catch(() => {});
       }
 
-      // Still translating. Wait — but not forever.
-      if (Date.now() - item.reservedAt > TRANSLATION_WAIT_MS) {
+      // Last resort, only after a full minute of trying: read the original
+      // text in the ORIGINAL language's voice. Degraded but complete — the
+      // listener hears the message rather than silently missing it.
+      if (waited > TRANSLATION_FALLBACK_MS) {
+        item.usedLanguageFallback = true;
         startSpeechFetch(item, item.originalText, item.originalLanguage);
         changed = true;
       }
     }
+
     if (changed && !isPlayingRef.current) playNext();
   }
 
-  // Moves a slot from 'awaiting' to 'pending', fetches its audio, then marks it
-  // ready. The slot never moves position, so playback order is always message
-  // order regardless of which fetch finishes first.
+  // Fetches a slot's audio and marks it ready. On failure the slot is queued
+  // for another attempt instead of being discarded — it keeps its place, so
+  // the queue waits for it rather than skipping ahead.
   async function startSpeechFetch(item, text, language) {
     item.status = 'pending';
     item.text = text;
     item.language = language;
+    item.ttsAttempts = (item.ttsAttempts ?? 0) + 1;
 
     try {
       const segments = await fetchTTSAudio(text, language, ttsSpeedRef.current);
@@ -351,33 +368,41 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       item.status = 'ready';
       setTtsError('');
     } catch (err) {
-      console.error('TTS error:', err.message);
-      item.status = 'failed';
-      setTtsError(err.message);
+      if (!audioQueueRef.current.includes(item)) return;
+      console.error(`TTS error (attempt ${item.ttsAttempts}):`, err.message);
+
+      if (item.ttsAttempts < MAX_TTS_ATTEMPTS) {
+        item.status = 'retrying';
+        item.nextAttemptAt = Date.now() + backoff(TTS_RETRY_BASE_MS, item.ttsAttempts);
+      } else if (!item.usedLanguageFallback && language !== item.originalLanguage) {
+        // Audio for the translation is unavailable — try the original text in
+        // its own language before giving up on speaking this message at all.
+        item.usedLanguageFallback = true;
+        item.ttsAttempts = 0;
+        item.status = 'retrying';
+        item.nextAttemptAt = Date.now();
+        item.text = item.originalText;
+        item.language = item.originalLanguage;
+      } else {
+        // Genuinely unrecoverable. Surface it rather than skipping in silence.
+        item.status = 'failed';
+        setTtsError(t.messageNotReadAloud ?? 'A message could not be read aloud — please read it in the chat.');
+      }
     }
     if (!isPlayingRef.current) playNext();
   }
 
   // Used by the speed toggle to re-speak the current message at a new rate.
-  async function fetchAndEnqueue(text, msgId, language = userLanguage) {
+  // Goes through startSpeechFetch so it gets the same retry behaviour.
+  function fetchAndEnqueue(text, msgId, language = userLanguage) {
     const item = {
-      status: 'pending', segments: null, msgId, text, language,
+      status: 'awaiting', segments: null, msgId, text: null, language: null,
       originalText: text, originalLanguage: language, reservedAt: Date.now(),
+      ttsAttempts: 0, nextAttemptAt: 0,
     };
     audioQueueRef.current.push(item);
     setQueueLength(audioQueueRef.current.length);
-    try {
-      const segments = await fetchTTSAudio(text, language, ttsSpeedRef.current);
-      if (!audioQueueRef.current.includes(item)) return;
-      item.segments = segments;
-      item.status = 'ready';
-      setTtsError('');
-    } catch (err) {
-      console.error('TTS error:', err.message);
-      item.status = 'failed';
-      setTtsError(err.message);
-    }
-    if (!isPlayingRef.current) playNext();
+    startSpeechFetch(item, text, language);
   }
 
   function toggleListening() {
@@ -427,7 +452,6 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // fast-translating message overtake a slow one and be spoken out of order —
   // which is very easy to hit when several messages are sent in quick
   // succession, or when one translation retries after a transient failure.
-  const ttsRetriedIdsRef = useRef(new Set());
   useEffect(() => {
     if (!listeningMode) return;
     for (const msg of messages) {
@@ -444,6 +468,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
         originalText: msg.text,
         originalLanguage: msg.originalLanguage,
         reservedAt: Date.now(),
+        ttsAttempts: 0,
+        nextAttemptAt: 0,
+        translationAttempts: 0,
+        nextTranslationRetryAt: 0,
+        usedLanguageFallback: false,
       });
       setQueueLength(audioQueueRef.current.length);
     }

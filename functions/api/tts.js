@@ -11,7 +11,10 @@ const VOICES = {
 // Messages are capped at 500 chars client-side, but translations routinely run
 // longer than their source (German/Russian/Polish expand well past English), so
 // the accepted length here must leave generous headroom above that cap.
-const MAX_TEXT_CHARS = 2000;
+// Google's own 5000-byte limit applies per synthesis request, and text is split
+// into ~420-char chunks below, so a high cap here costs nothing and removes
+// "text too long" as a way for a message to fail to be read aloud at all.
+const MAX_TEXT_CHARS = 4000;
 // Google TTS accepts far more than this, but shorter requests synthesize faster
 // and let playback start sooner. Text above this is split on sentence bounds.
 const CHUNK_TARGET_CHARS = 420;
@@ -67,7 +70,7 @@ function chunkText(text, maxChars = CHUNK_TARGET_CHARS) {
   return chunks.filter(Boolean);
 }
 
-async function synthesize(text, voice, speakingRate, apiKey) {
+async function synthesize(text, voice, speakingRate, apiKey, attempt = 0) {
   const res = await fetch(
     `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
     {
@@ -82,6 +85,13 @@ async function synthesize(text, voice, speakingRate, apiKey) {
   );
   const data = await res.json();
   if (!res.ok) {
+    // A long message is several chunks; without this one flaky chunk would
+    // fail the whole message and it would never be read aloud.
+    const transient = res.status === 429 || res.status >= 500;
+    if (transient && attempt < 3) {
+      await new Promise(r => setTimeout(r, 250 * 2 ** attempt));
+      return synthesize(text, voice, speakingRate, apiKey, attempt + 1);
+    }
     const err = new Error(data.error?.message || 'Google TTS error');
     err.status = res.status;
     throw err;
