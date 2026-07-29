@@ -68,14 +68,20 @@ async function fetchTTSAudio(text, language, speed = 1, attempt = 0) {
   return segments;
 }
 
-async function translateBatch(texts, targetLanguages) {
+async function translateBatch(texts, targetLanguages, attempt = 0) {
   const res = await fetch('/api/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ texts, targetLanguages }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Batch translation request failed');
+  if (!res.ok) {
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise(r => setTimeout(r, 400 * 2 ** attempt));
+      return translateBatch(texts, targetLanguages, attempt + 1);
+    }
+    throw new Error(data.error || 'Batch translation request failed');
+  }
   return data; // { translationSets: [{ [lang]: "..." }, ...] }
 }
 
@@ -186,7 +192,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // Web Audio API — AudioContext created on user gesture stays unlocked permanently on iOS
   const audioCtxRef = useRef(null);
   const currentSourceRef = useRef(null);
-  // Queue of { status: 'pending'|'ready'|'failed', segments, msgId, text, language }.
+  // Queue of { status: 'awaiting'|'pending'|'retrying'|'ready'|'failed', ... }.
   // Slots are reserved synchronously when a message arrives so playback order
   // always matches message order, even though fetches finish out of order
   // (a cache hit resolves far sooner than a network round-trip).
@@ -407,12 +413,15 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
 
   function toggleListening() {
     if (!listeningMode) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        ctx.resume();
-        audioCtxRef.current = ctx;
+      // Reuse the existing context. Browsers cap how many AudioContexts a page
+      // may hold (Chrome allows ~6), so creating a fresh one on every toggle
+      // eventually breaks audio outright. Creating it here still satisfies
+      // iOS's requirement that it originate from a user gesture.
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) audioCtxRef.current = new AudioCtx();
       }
+      audioCtxRef.current?.resume().catch(() => {});
       setTtsError('');
       spokenIdsRef.current = new Set(messages.map(m => m.id));
     } else {
@@ -488,11 +497,11 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   }, [listeningMode, userLanguage]);
 
   // Session history — retroactively translate messages missing our language.
-  // All missing messages are sent to Gemini in ONE call, then written to Firestore
-  // in batches of 450 (just under the writeBatch 500-op limit).
+  // All missing messages go to the translation API in ONE call, then are written
+  // to Firestore in batches of 450 (just under the writeBatch 500-op limit).
   const translatingIdsRef = useRef(new Set());
   useEffect(() => {
-    // Cap at 30 most-recent to avoid huge Gemini requests on rooms with many missed messages
+    // Cap at 30 most-recent to avoid huge requests on rooms with many missed messages
     const missing = messages.filter(msg =>
       !msg.isSystem &&
       msg.senderId !== userId &&
@@ -530,7 +539,7 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
           const msg = missing[i];
           const translations = sets[i] ?? {};
 
-          // Skip if real-time translation arrived while Gemini was running
+          // Skip if real-time translation arrived while the batch was running
           const already = latestMessagesRef.current.find(m => m.id === msg.id);
           if (already?.translations?.[userLanguage]) {
             translatingIdsRef.current.delete(msg.id);
@@ -615,16 +624,26 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
     return () => { unsubRoom(); unsubMe(); };
   }, [roomId, userId, onLeave]);
 
-  // Real-time messages
+  // Real-time messages. The live listener only covers the newest PAGE_SIZE
+  // messages, so pages the user pulled in with "Load earlier" are kept
+  // separately and prepended — otherwise the next snapshot (any new message or
+  // translation update) would silently discard everything they just loaded.
+  const olderMessagesRef = useRef([]);
   useEffect(() => {
+    olderMessagesRef.current = [];
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     const q = query(msgsRef, orderBy('timestamp', 'desc'), limit(PAGE_SIZE));
     const unsub = onSnapshot(q, (snap) => {
       const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
       setHasMore(snap.docs.length === PAGE_SIZE);
       setLastVisible(snap.docs[snap.docs.length - 1] ?? null);
-      setMessages(fetched);
-      if (fetched.length > 0) latestMessagesRef.current = fetched; // preserve across room deletion
+
+      const liveIds = new Set(fetched.map((m) => m.id));
+      const older = olderMessagesRef.current.filter((m) => !liveIds.has(m.id));
+      const combined = [...older, ...fetched];
+
+      setMessages(combined);
+      if (combined.length > 0) latestMessagesRef.current = combined; // preserve across room deletion
     }, (err) => console.error('Messages watch error:', err));
     return unsub;
   }, [roomId]);
@@ -650,7 +669,13 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const older = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
       setHasMore(snap.docs.length === PAGE_SIZE);
       setLastVisible(snap.docs[snap.docs.length - 1] ?? null);
-      setMessages((prev) => [...older, ...prev]);
+      // Held outside React state so the live listener can re-apply them
+      const existing = new Set(olderMessagesRef.current.map((m) => m.id));
+      olderMessagesRef.current = [
+        ...older.filter((m) => !existing.has(m.id)),
+        ...olderMessagesRef.current,
+      ];
+      setMessages((prev) => [...older.filter((m) => !prev.some((p) => p.id === m.id)), ...prev]);
     } catch (err) {
       console.error('Load more error:', err);
     } finally {

@@ -18,10 +18,14 @@ service cloud.firestore {
       allow read: if isAuth();
       allow create: if isAuth()
                     && request.resource.data.createdBy == request.auth.uid;
-      // Must already be a participant (or the owner) to update room fields.
-      // New joiners write their participant doc first, then update the room, so this works.
+      // Must already be a participant (or the owner) to update room fields, and
+      // only `sessionEnded` may ever change. Without the field restriction any
+      // participant could rewrite `createdBy` to make themselves host (gaining
+      // kick and delete rights) or overwrite `passwordHash` to lock the room.
       allow update: if isAuth()
-                    && (isParticipant(roomId) || resource.data.createdBy == request.auth.uid);
+                    && (isParticipant(roomId) || resource.data.createdBy == request.auth.uid)
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['sessionEnded']);
       allow delete: if isAuth()
                     && resource.data.createdBy == request.auth.uid;
     }
@@ -38,9 +42,14 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId}/messages/{msgId} {
-      // Only participants can read or create messages.
+      // Only participants can read or create messages. A message must be
+      // attributed to its actual author, so one participant cannot post under
+      // another's identity. The owner is exempt because kick notices are
+      // written by the host on the kicked user's behalf.
       allow read:   if isAuth() && isParticipant(roomId);
-      allow create: if isAuth() && isParticipant(roomId);
+      allow create: if isAuth() && isParticipant(roomId)
+                    && (request.resource.data.senderId == request.auth.uid
+                        || isOwner(roomId));
       // Own message: full update.
       // Other message: participants may only update translations/translationFailed
       // (needed for retroactive translation and retry flows).

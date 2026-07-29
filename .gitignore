@@ -3,3 +3,9 @@ dist/
 .env
 functions/node_modules/
 .claude/
+
+# OS / editor cruft
+.DS_Store
+*.local
+.vscode/
+.idea/
