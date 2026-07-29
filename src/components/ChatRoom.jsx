@@ -201,6 +201,8 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const spokenIdsRef = useRef(new Set());
   const currentItemRef = useRef(null); // currently-playing queue item
   const playGenerationRef = useRef(0); // bumped by stopAllAudio to cancel in-flight chains
+  const messagesLoadedRef = useRef(false);        // first message snapshot has arrived
+  const pendingListenBaselineRef = useRef(false); // listening began before that snapshot
 
   async function playNext() {
     const queue = audioQueueRef.current;
@@ -423,7 +425,18 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       }
       audioCtxRef.current?.resume().catch(() => {});
       setTtsError('');
-      spokenIdsRef.current = new Set(messages.map(m => m.id));
+
+      // Establish the "everything before now" baseline so only messages sent
+      // AFTER this tap are read aloud. If the first snapshot has not arrived
+      // yet the baseline would be empty, and every message that then loaded
+      // would be treated as new and read out — a whole page of old audio.
+      // In that case defer the baseline to the first snapshot instead.
+      if (messagesLoadedRef.current) {
+        spokenIdsRef.current = new Set(messages.map(m => m.id));
+        pendingListenBaselineRef.current = false;
+      } else {
+        pendingListenBaselineRef.current = true;
+      }
     } else {
       stopAllAudio();
       setTtsError('');
@@ -463,6 +476,17 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   // succession, or when one translation retries after a transient failure.
   useEffect(() => {
     if (!listeningMode) return;
+
+    // Listening was switched on before the message history had loaded. Adopt
+    // the first loaded page as the baseline and speak none of it — the user
+    // asked to hear what comes next, not what was already there.
+    if (pendingListenBaselineRef.current) {
+      if (!messagesLoadedRef.current) return;
+      spokenIdsRef.current = new Set(messages.map(m => m.id));
+      pendingListenBaselineRef.current = false;
+      return;
+    }
+
     for (const msg of messages) {
       if (spokenIdsRef.current.has(msg.id)) continue;
       spokenIdsRef.current.add(msg.id);
@@ -631,10 +655,12 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
   const olderMessagesRef = useRef([]);
   useEffect(() => {
     olderMessagesRef.current = [];
+    messagesLoadedRef.current = false;
     const msgsRef = collection(db, 'rooms', roomId, 'messages');
     const q = query(msgsRef, orderBy('timestamp', 'desc'), limit(PAGE_SIZE));
     const unsub = onSnapshot(q, (snap) => {
       const fetched = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
+      messagesLoadedRef.current = true; // even an empty room counts as loaded
       setHasMore(snap.docs.length === PAGE_SIZE);
       setLastVisible(snap.docs[snap.docs.length - 1] ?? null);
 
@@ -669,6 +695,10 @@ export default function ChatRoom({ roomId, userId, userName, userLanguage, isOwn
       const older = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
       setHasMore(snap.docs.length === PAGE_SIZE);
       setLastVisible(snap.docs[snap.docs.length - 1] ?? null);
+      // These are older than anything already on screen, so they must never be
+      // read aloud — without this, tapping "Load earlier" while listening would
+      // queue the entire page of history for speech.
+      older.forEach((m) => spokenIdsRef.current.add(m.id));
       // Held outside React state so the live listener can re-apply them
       const existing = new Set(olderMessagesRef.current.map((m) => m.id));
       olderMessagesRef.current = [
